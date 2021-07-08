@@ -1,0 +1,90 @@
+name: Ardour Cross Compile Build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  repository_dispatch:
+    types: ardour-build
+
+env:
+  ARDOUR_VERSION: 6.8
+  # ARDOUR_SHA256_SUMS: bb5b48b7204c7dbfdc3b690a50e07cd651e82e0e6f8c2aefeb3d4b4289f4002d
+  # ARCH: x86_64
+  # available upload services: wetransfer.com, file.io, 0x0.st
+  UPLOAD_SERVICE: wetransfer.com
+
+jobs:
+  ardour-build:
+    runs-on: ubuntu-20.04
+    container:
+      image: debian:buster
+      options: -v /__w/ardour-build/ardour-build:/home/ardour:rw
+    steps:
+
+      - name: Install Dependencies on Debian
+        shell: bash
+        run: |
+          apt-get -y -qq update && apt-get -y --no-install-recommends install \
+            apt-transport-https \
+            curl \
+            wget \
+            sudo \
+            git \
+            ca-certificates \
+            unzip \
+            ed \
+            yasm \
+            cmake \
+            nsis \
+            subversion \
+            ocaml-nox \
+            gperf \
+            meson \
+            python \
+            python3 \
+            build-essential \
+            autoconf \
+            automake \
+            libtool \
+            pkg-config
+
+      - name: Get the Latest Release Source Code
+        shell: bash
+        run: |
+          git clone --depth 1 --branch ${{ env.ARDOUR_VERSION }} https://github.com/Ardour/ardour.git /home/ardour/src
+      
+      - name: Build Stack Install
+        shell: bash
+        run: bash /home/ardour/ci/x-mingw.sh
+      
+      - name: Compile
+        shell: bash
+        run: bash /home/ardour/src/tools/x-win/compile.sh
+
+      - name: Package
+        shell: bash
+        run: bash /home/ardour/src/tools/x-win/package.sh
+      
+      # https://community.ardour.org/srctar
+      # https://fossies.org/linux/misc/Ardour-6.8.0.tar.bz2
+      # - uses: actions/checkout@v2
+      #   with:
+      #     repository: 'Ardour/ardour'
+      #     ref: 'master'
+      #     # Relative path under $GITHUB_WORKSPACE (/github/workspace) to place the repository
+      #     path: '/ardour'
+
+      # - uses: actions/checkout@v2
+      #   with:
+      #     ref: 'dev'
+          # Relative path under $GITHUB_WORKSPACE (/github/workspace) to place the repository
+          # path: '/ardour-build'
+
+      - name: Upload Binary
+        shell: bash
+        run: |
+            TEMP_DOWNLOAD_URL=$(sh /home/ardour/ci/services/${{ env.UPLOAD_SERVICE }}.sh /var/tmp/Ardour-*-Setup.exe)
+            echo Download URL is $TEMP_DOWNLOAD_URL. 
+          
