@@ -697,7 +697,7 @@ src libusb-1.0.20 tar.bz2 http://downloads.sourceforge.net/project/libusb/libusb
 # alternative: https://github.com/chriskohlhoff/asio
 rm -f ${PREFIX}/include/pa_asio.h ${PREFIX}/include/portaudio.h ${PREFIX}/include/asio.h
 if test ! -d ${SRCDIR}/soundfind.git.reference; then
-	git clone --mirror git://github.com/aardvarkk/soundfind.git ${SRCDIR}/soundfind.git.reference
+	git clone --mirror git://github.com/chriskohlhoff/asio.git ${SRCDIR}/soundfind.git.reference
 fi
 cd ${BUILDD}
 #git clone --reference ${SRCDIR}/soundfind.git.reference --depth 1 git://github.com/aardvarkk/soundfind.git || true
