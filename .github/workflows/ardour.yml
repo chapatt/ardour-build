@@ -45,6 +45,7 @@ jobs:
             python \
             python3 \
             build-essential \
+            ccache \
             autoconf \
             automake \
             libtool \
