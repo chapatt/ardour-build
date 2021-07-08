@@ -22,7 +22,7 @@ jobs:
       image: debian:buster
       options: -v /__w/ardour-build/ardour-build:/home/ardour:rw
     steps:
-
+      
       - name: Install Dependencies on Debian
         shell: bash
         run: |
@@ -50,9 +50,16 @@ jobs:
             libtool \
             pkg-config
 
+      - name: Checkout Tools
+        shell: bash
+        run: |
+          cd /home/ardour
+          git clone --branch master https://github.com/ZetaoYang/ardour-build.git .
+
       - name: Get the Latest Release Source Code
         shell: bash
         run: |
+          ls -l /home/ardour
           git clone --depth 1 --branch ${{ env.ARDOUR_VERSION }} https://github.com/Ardour/ardour.git /home/ardour/src
       
       - name: Build Stack Install
