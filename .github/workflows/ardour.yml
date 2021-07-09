@@ -11,7 +11,7 @@ on:
 env:
   ARDOUR_VERSION: 6.8
   # ARDOUR_SHA256_SUMS: bb5b48b7204c7dbfdc3b690a50e07cd651e82e0e6f8c2aefeb3d4b4289f4002d
-  # ARCH: x86_64
+  ARCH: x86_64
   # available upload services: wetransfer.com, file.io, 0x0.st
   UPLOAD_SERVICE: wetransfer.com
 
@@ -70,10 +70,14 @@ jobs:
       - name: Compile
         shell: bash
         run: bash /home/ardour/src/tools/x-win/compile.sh
+        env:
+          XARCH: ${{ env.ARCH }}
 
       - name: Package
         shell: bash
         run: bash /home/ardour/src/tools/x-win/package.sh
+        env:
+          XARCH: ${{ env.ARCH }}
       
       # https://community.ardour.org/srctar
       # https://fossies.org/linux/misc/Ardour-6.8.0.tar.bz2
