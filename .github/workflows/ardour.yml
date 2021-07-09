@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-20.04
     container:
       image: debian:buster
-      options: -v /__w/ardour-build/ardour-build:/home/ardour/:rw
+      # options: -v /__w/ardour-build/ardour-build:/home/ardour/:rw
     steps:
       
       - name: Install Dependencies on Debian
@@ -66,11 +66,11 @@ jobs:
           ref: master
           path: '.'
 
-      - name: test
+      - name: Prepare
         shell: bash
         run: |
-          ls -l /home/ardour
-          ls -l /__w/ardour-build/ardour-build
+          mkdir -p ${{ github.workspace }}/tmp/winsrc
+
       # - name: Get the Latest Release Source Code
       #   shell: bash
       #   run: |
@@ -93,26 +93,37 @@ jobs:
         id: cache-win-stack
         uses: actions/cache@v2
         with:
-          path: /home/ardour/win-stack-${{ env.WARCH }}
+          path: | 
+            ${{ github.workspace }}/win-stack-${{ env.WARCH }}
+            ${{ github.workspace }}/tmp/winsrc
           key: ${{ runner.os }}-win-stack
 
       - name: Build Stack Install
         shell: bash
         if: steps.cache-win-stack.outputs.cache-hit != 'true'
-        run: bash /home/ardour/ci/x-mingw.sh
+        run: bash ${{ github.workspace }}/ci/x-mingw.sh
+        env:
+          XARCH: ${{ env.ARCH }}
+          SRCDIR: ${{ github.workspace }}/tmp/winsrc
+          TMPDIR: ${{ github.workspace }}/tmp
+          ROOT: ${{ github.workspace }}
       
       - name: Compile
         shell: bash
         # run: bash /home/ardour/src/tools/x-win/compile.sh
-        run: bash /home/ardour/ci/compile.sh
+        run: bash ${{ github.workspace }}/ci/compile.sh
         env:
           XARCH: ${{ env.ARCH }}
+          ROOT: ${{ github.workspace }}
 
       - name: Package
         shell: bash
-        run: bash /home/ardour/src/tools/x-win/package.sh
+        run: bash ${{ github.workspace }}/ci/package.sh
         env:
           XARCH: ${{ env.ARCH }}
+          ROOT: ${{ github.workspace }}
+          TMPDIR: ${{ github.workspace }}/tmp
+          SRCCACHE: ${{ github.workspace }}/tmp/winsrc
       
       # https://community.ardour.org/srctar
       # https://fossies.org/linux/misc/Ardour-6.8.0.tar.bz2
@@ -132,6 +143,6 @@ jobs:
       - name: Upload Binary
         shell: bash
         run: |
-            TEMP_DOWNLOAD_URL=$(sh /home/ardour/ci/services/${{ env.UPLOAD_SERVICE }}.sh /var/tmp/Ardour-*-Setup.exe)
+            TEMP_DOWNLOAD_URL=$(sh ${{ github.workspace }}/ci/services/${{ env.UPLOAD_SERVICE }}.sh ${{ github.workspace }}/tmp/Ardour-*-Setup.exe)
             echo Download URL is $TEMP_DOWNLOAD_URL. 
           
