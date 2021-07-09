@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
 # this script creates a windows32/64bit build-stack for Ardour
 # cross-compiled on GNU/Linux using gcc-8.2 (debian buster)
 #
