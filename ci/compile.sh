@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
+set -x
 
 # we assuem this script is <ardour-src>/tools/x-win/compile.sh
+# <ardour-build-src>/ci/compile.sh
 pushd "`/usr/bin/dirname \"$0\"`" > /dev/null; this_script_dir="`pwd`"; popd > /dev/null
-cd "$this_script_dir/../.."
+# cd "$this_script_dir/../.."
+cd "$this_script_dir/../src"
 test -f gtk2_ardour/wscript || exit 1
 
 : ${XARCH=i686} # or x86_64
