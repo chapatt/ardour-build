@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-20.04
     container:
       image: debian:buster
-      options: -v /__w/ardour-build/ardour-build:/home/ardour:rw
+      options: -v /__w/ardour-build/ardour-build:/home/ardour/:rw
     steps:
       
       - name: Install Dependencies on Debian
@@ -66,6 +66,11 @@ jobs:
           ref: master
           path: '.'
 
+      - name: test
+        shell: bash
+        run: |
+          ls -l /home/ardour
+          ls -l /__w/ardour-build/ardour-build
       # - name: Get the Latest Release Source Code
       #   shell: bash
       #   run: |
