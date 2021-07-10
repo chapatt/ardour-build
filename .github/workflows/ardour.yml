@@ -15,6 +15,8 @@ env:
   WARCH: w64
   # available upload services: wetransfer.com, file.io, 0x0.st
   UPLOAD_SERVICE: wetransfer.com
+  # https://community.ardour.org/srctar
+  # https://fossies.org/linux/misc/Ardour-6.8.0.tar.bz2
 
 jobs:
   ardour-build:
@@ -46,6 +48,7 @@ jobs:
             meson \
             python \
             python3 \
+            python3-pip \
             build-essential \
             ccache \
             autoconf \
@@ -87,18 +90,18 @@ jobs:
           ref: ${{ env.ARDOUR_VERSION }}
           path: './src'
 
-      - name: Cache Win Stack
-        id: cache-win-stack
-        uses: actions/cache@v2
-        with:
-          path: | 
-            /home/ardour/win-stack-${{ env.WARCH }}
-            /home/ardour/tmp/winsrc
-          key: ${{ runner.os }}-win-stack
+      # - name: Cache Win Stack
+      #   id: cache-win-stack
+      #   uses: actions/cache@v2
+      #   with:
+      #     path: | 
+      #       /home/ardour/win-stack-${{ env.WARCH }}
+      #       /home/ardour/tmp/winsrc
+      #     key: ${{ runner.os }}-win-stack-v${{ env.ARDOUR_VERSION }}
 
       - name: Build Stack Install
         shell: bash
-        if: steps.cache-win-stack.outputs.cache-hit != 'true'
+        # if: steps.cache-win-stack.outputs.cache-hit != 'true'
         run: |
           bash /home/ardour/ci/x-mingw.sh
         env:
@@ -109,7 +112,6 @@ jobs:
       
       - name: Compile
         shell: bash
-        # run: bash /home/ardour/src/tools/x-win/compile.sh
         run: |
           bash /home/ardour/ci/compile.sh
         env:
@@ -125,25 +127,17 @@ jobs:
           ROOT: /home/ardour
           TMPDIR: /home/ardour/tmp
           SRCCACHE: /home/ardour/tmp/winsrc
-      
-      # https://community.ardour.org/srctar
-      # https://fossies.org/linux/misc/Ardour-6.8.0.tar.bz2
-      # - uses: actions/checkout@v2
-      #   with:
-      #     repository: 'Ardour/ardour'
-      #     ref: 'master'
-      #     # Relative path under $GITHUB_WORKSPACE (/github/workspace) to place the repository
-      #     path: '/ardour'
-
-      # - uses: actions/checkout@v2
-      #   with:
-      #     ref: 'dev'
-          # Relative path under $GITHUB_WORKSPACE (/github/workspace) to place the repository
-          # path: '/ardour-build'
 
       - name: Upload Binary
+        # /home/ardour/tmp/Ardour-6.8.0-dbg-w64-Setup.exe
         shell: bash
         run: |
             TEMP_DOWNLOAD_URL=$(sh /home/ardour/ci/services/${{ env.UPLOAD_SERVICE }}.sh /home/ardour/tmp/Ardour-*-Setup.exe)
             echo Download URL is $TEMP_DOWNLOAD_URL. 
-          
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: Ardour-Cross-Compile-Win-Artifact
+          path: |
+            ${{ github.workspace }}/tmp/Ardour-*-Setup.exe
