@@ -311,7 +311,8 @@ wq
 EOF
 autoconfbuild
 
-src expat-2.1.0 tar.gz https://sourceforge.net/projects/expat/files/expat/2.1.0/expat-2.1.0-RENAMED-VULNERABLE-PLEASE-USE-2.3.0-INSTEAD.tar.gz
+src expat-2.4.1 tar.gz https://sourceforge.net/projects/expat/files/expat/2.4.1/expat-2.4.1.tar.gz
+# src expat-2.1.0 tar.gz https://sourceforge.net/projects/expat/files/expat/2.1.0/expat-2.1.0-RENAMED-VULNERABLE-PLEASE-USE-2.3.0-INSTEAD.tar.gz
 autoconfbuild
 
 src libiconv-1.16 tar.gz http://ftpmirror.gnu.org/libiconv/libiconv-1.16.tar.gz
