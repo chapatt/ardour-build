@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env sh
 
 URL="https://transfer.sh"
 

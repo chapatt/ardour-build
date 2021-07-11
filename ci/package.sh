@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # we assume this script is <ardour-src>/tools/x-win/package.sh
 pushd "`/usr/bin/dirname \"$0\"`" > /dev/null; this_script_dir="`pwd`"; popd > /dev/null
@@ -11,7 +11,7 @@ cd $this_script_dir/../..
 test -f gtk2_ardour/wscript || exit 1
 
 # Defaults (overridden by environment)
-: ${XARCH=x86_64} # i686 or x86_64
+: ${XARCH=i686} # or x86_64
 : ${ROOT=/home/ardour}
 : ${MAKEFLAGS=-j4}
 : ${TMPDIR=/var/tmp}
@@ -19,7 +19,7 @@ test -f gtk2_ardour/wscript || exit 1
 
 : ${HARRISONCHANNELSTRIP=harrison_channelstrip}
 : ${HARRISONLV2=harrison_lv2s-n}
-: ${HARRISONDSPURL=https://www.harrisonconsoles.com/plugins/releases/public}
+: ${HARRISONDSPURL=https://rsrc.harrisonconsoles.com/plugins/releases/public}
 
 # see also wscript, video_tool_paths.cc, bundle_env_mingw.cc
 # registry keys based on this are used there
@@ -146,18 +146,28 @@ cp build/libs/pbd/pbd-*.dll $DESTDIR/bin/
 cp build/libs/ptformat/ptformat-*.dll $DESTDIR/bin/
 cp build/libs/audiographer/audiographer-*.dll $DESTDIR/bin/
 cp build/libs/fst/ardour-vst-scanner.exe $DESTDIR/bin/ || true
+cp build/libs/fst/ardour-vst3-scanner.exe $DESTDIR/bin/ || true
 cp build/session_utils/*-*.exe $DESTDIR/bin/ || true
-cp build/luasession/ardour6-lua.exe $DESTDIR/bin/ || true
+cp build/luasession/ardour*-lua.exe $DESTDIR/bin/ || true
 cp `ls -t build/gtk2_ardour/ardour-*.exe | head -n1` $DESTDIR/bin/${PRODUCT_EXE}
 
 mkdir -p $DESTDIR/lib/gtk-2.0/engines
 cp build/libs/clearlooks-newer/clearlooks.dll $DESTDIR/lib/gtk-2.0/engines/libclearlooks.la
 
-cp $PREFIX/bin/*dll $DESTDIR/bin/
-cp $PREFIX/lib/*dll $DESTDIR/bin/
+cp $PREFIX/bin/*.dll $DESTDIR/bin/
+cp $PREFIX/bin/*.yes $DESTDIR/bin/ || true
+cp $PREFIX/lib/*.dll $DESTDIR/bin/
 # special case libportaudio (wasapi), old stack has no wasapi and hence no .xp
 cp $PREFIX/bin/libportaudio-2.xp $DESTDIR/bin/ || cp $PREFIX/bin/libportaudio-2.dll $DESTDIR/bin/libportaudio-2.xp
+
+# prefer system-wide DLL
 rm -rf $DESTDIR/bin/libjack*.dll
+# Also for these (even though M$ recommends to bundle these [1],
+# there is no single set that works on all target systems, particularly
+# since some plugins also rely on it.
+# [1] https://docs.microsoft.com/en-us/windows/win32/debug/calling-the-dbghelp-library
+rm -rf $DESTDIR/bin/dbghelp*.dll
+rm -rf $DESTDIR/bin/dbgcore*.dll
 
 cp `find build/libs/surfaces/ -iname "*.dll"` $ALIBDIR/surfaces/
 cp `find build/libs/backends/ -iname "*.dll"` $ALIBDIR/backends/
@@ -168,10 +178,13 @@ cp -r build/libs/vamp-plugins/*ardourvampplugins*.dll $ALIBDIR/vamp/libardourvam
 cp -r build/libs/vamp-pyin/*ardourvamppyin*.dll $ALIBDIR/vamp/libardourvamppyin.dll
 cp $PREFIX/lib/suil-*/*.dll $ALIBDIR/suil/ || true
 
-# lv2 core, classifications etc - TODO check if we need the complete LV2 ontology
-if test -d $PREFIX/lib/lv2/lv2core.lv2 ; then
-	cp -R $PREFIX/lib/lv2/lv2core.lv2 $ALIBDIR/LV2/
-fi
+# lv2 core, classifications
+for file in $PREFIX/lib/lv2/*.lv2; do
+	BN=$(basename $file)
+	mkdir -p $ALIBDIR/LV2/$BN
+	cp $PREFIX/lib/lv2/${BN}/*.ttl $ALIBDIR/LV2/${BN}/
+done
+
 
 mv $ALIBDIR/surfaces/ardourcp*.dll $DESTDIR/bin/
 
@@ -305,7 +318,7 @@ if test x$WITH_GRATIS_X42_LV2 != x ; then
 fi
 
 if test x$WITH_HARRISON_LV2 != x ; then
-	mkdir -p $ALIBDIR/LV2
+	mkdir -p $DESTDIR/LV2
 
 	echo "Including Harrison LV2s"
 
@@ -313,7 +326,7 @@ if test x$WITH_HARRISON_LV2 != x ; then
 		-z "${SRCCACHE}/${HARRISONLV2}.${WARCH}.zip" \
 		-o "${SRCCACHE}/${HARRISONLV2}.${WARCH}.zip" \
 		"${HARRISONDSPURL}/${HARRISONLV2}.${WARCH}.zip"
-	unzip -q -d "$ALIBDIR/LV2/" "${SRCCACHE}/${HARRISONLV2}.${WARCH}.zip"
+	unzip -q -d "$DESTDIR/LV2/" "${SRCCACHE}/${HARRISONLV2}.${WARCH}.zip"
 fi
 
 if test -n "$MIXBUS"; then
@@ -389,6 +402,7 @@ RequestExecutionLevel admin
 InstallDir "\$${PGF}\\${PRODUCT_ID}"
 InstallDirRegKey HKLM "Software\\${PRODUCT_NAME}\\${PRODUCT_ID}\\$WARCH" "Install_Dir"
 !define MUI_ICON "share\\${PRODUCT_ICON}"
+!define MUI_UNICON "share\\${PRODUCT_ICON}"
 
 EOF
 
@@ -407,7 +421,7 @@ else
 
 	cat >> $NSISFILE << EOF
 !define MUI_FINISHPAGE_TITLE "Welcome to Ardour"
-!define MUI_FINISHPAGE_TEXT "This windows versions or Ardour is provided as-is.\$\\r\$\\nThe Ardour community currently has no expertise in supporting windows users, and there are no developers focusing on windows specific issues either.\$\\r\$\\nIf you like Ardour, please consider helping out."
+!define MUI_FINISHPAGE_TEXT "This Windows version of Ardour is provided as-is.\$\\r\$\\nThe Ardour community currently has no expertise in supporting Windows users, and there are no developers focusing on Windows-specific issues either.\$\\r\$\\nIf you like Ardour, please consider helping out."
 !define MUI_FINISHPAGE_LINK "Ardour Manual"
 !define MUI_FINISHPAGE_LINK_LOCATION "http://manual.ardour.org/"
 #this would run as admin - see http://forums.winamp.com/showthread.php?t=353366
@@ -460,6 +474,27 @@ EOF
 
 fi
 
+if test x$WITH_HARRISON_LV2 != x ; then
+if test -n "$MIXBUS"; then
+	cat >> $NSISFILE << EOF
+Section "Harrison XT plugins (required)" SecXT
+  SectionIn RO
+  SetOutPath \$INSTDIR\\lib\\${LOWERCASE_DIRNAME}\\LV2
+  File LV2\\.harrison_version.txt
+  File /r LV2\\*.lv2
+SectionEnd
+EOF
+else
+	cat >> $NSISFILE << EOF
+Section "Harrison XT plugins and ACE plugin GUIs" SecXT
+  SetOutPath \$INSTDIR\\lib\\${LOWERCASE_DIRNAME}\\LV2
+  File LV2\\.harrison_version.txt
+  File /r LV2\\*.lv2
+SectionEnd
+EOF
+fi
+fi
+
 cat >> $NSISFILE << EOF
 
 Section "WASAPI sound driver" SecWASAPI
@@ -467,6 +502,7 @@ SectionEnd
 
 Section "Start Menu Shortcuts" SecMenu
   SetShellVarContext all
+  SetOutPath \$INSTDIR
   CreateDirectory "\$SMPROGRAMS\\${PRODUCT_ID}${SFX}"
   CreateShortCut "\$SMPROGRAMS\\${PRODUCT_ID}${SFX}\\${PROGRAM_NAME}${PROGRAM_VERSION}.lnk" "\$INSTDIR\\bin\\${PRODUCT_EXE}" "" "\$INSTDIR\\bin\\${PRODUCT_EXE}" 0
 EOF
@@ -496,6 +532,11 @@ if test -z "$NOVIDEOTOOLS"; then
 LangString DESC_SecVideo \${LANG_ENGLISH} "Video Tools\$\\r\$\\nxjadeo-${XJADEO_VERSION}\$\\r\$\\nharvid-${HARVID_VERSION}"
 EOF
 fi
+if test x$WITH_HARRISON_LV2 != x ; then
+	cat >> $NSISFILE << EOF
+LangString DESC_SecXT \${LANG_ENGLISH} "These are proprietary additions, but the DSP is not license encumbered. XT-plugin GUIs are commercial, the additional a-*/ACE plugin GUIs are free."
+EOF
+fi
 
 cat >> $NSISFILE << EOF
 LangString DESC_SecMenu \${LANG_ENGLISH} "Create Start-Menu Shortcuts (recommended)."
@@ -507,6 +548,12 @@ EOF
 if test -z "$NOVIDEOTOOLS"; then
 	cat >> $NSISFILE << EOF
 !insertmacro MUI_DESCRIPTION_TEXT \${SecVideo} \$(DESC_SecVideo)
+EOF
+fi
+
+if test x$WITH_HARRISON_LV2 != x ; then
+	cat >> $NSISFILE << EOF
+!insertmacro MUI_DESCRIPTION_TEXT \${SecXT} \$(DESC_SecXT)
 EOF
 fi
 

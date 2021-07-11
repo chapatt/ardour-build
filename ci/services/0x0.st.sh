@@ -1,4 +1,5 @@
-#!/bin/sh
+#!/usr/bin/env sh
+
 #===============================================================
 # File URLs are valid for at least 30 days and up to a year (see below).
 # Shortened URLs do not expire.

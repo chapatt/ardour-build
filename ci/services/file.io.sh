@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env sh
 
 #==========================================
 # 100 uploads per day, 5GB file size limit for FREE plan.

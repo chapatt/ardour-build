@@ -1,4 +1,5 @@
-#!/bin/sh
+#!/usr/bin/env sh
+
 #=========================================================================================================================
 # WeTransfer is a service to send big or small files from A to B. 
 # It can transfer any type of file - such as presentations, photos, videos, music or documents - to friends and colleagues.
