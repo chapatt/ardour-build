@@ -1,0 +1,135 @@
+name: Ardour Build for Linux
+
+on:
+  push:
+    branches: 
+      - linux
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
+  pull_request:
+    branches: 
+      - linux
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
+  repository_dispatch:
+    types: ardour-linux-build
+
+env:
+  ARDOUR_VERSION: 6.8
+  # available upload services: wetransfer.com, file.io, 0x0.st
+  UPLOAD_SERVICE: wetransfer.com
+  # ardour spurce code tar ball, need check its sha256sums.
+  # https://community.ardour.org/srctar
+  # https://fossies.org/linux/misc/Ardour-6.8.0.tar.bz2
+
+jobs:
+  ardour-build:
+    name: Ardour Build for Linux 64bit
+    runs-on: ubuntu-20.04
+    steps:
+
+      - name: Get Ardour Latest Release Source Code
+        uses: actions/checkout@v2
+        with:
+          repository: 'Ardour/ardour'
+          fetch-depth: 1
+          ref: ${{ env.ARDOUR_VERSION }}
+          path: './src'
+
+      # https://linuxgamecast.com/2020/06/interfacing-linux-compiling-ardour-6-on-debian/
+      - name: Install the Dependencies
+        shell: bash
+        run: |
+          sudo apt-get -y -qq update && sudo apt-get -y --no-install-recommends install \
+            python3 \
+            python3-pip \
+            build-essential \
+            git \
+            libboost-all-dev \
+            gcc \
+            g++ \
+            pkg-config \
+            libasound2-dev \
+            libgtk2.0-dev \
+            glibmm-2.4-dev \
+            libsndfile1-dev \
+            libcurl4-nss-dev \
+            libarchive-dev \
+            liblo-dev \
+            libtag1-dev \
+            vamp-plugin-sdk \
+            librubberband-dev \
+            libfftw3-dev \
+            libaubio-dev \
+            libxml2-dev \
+            libsamplerate-dev \
+            lv2-dev \
+            libserd-dev \
+            libsord-dev \
+            libsratom-dev \
+            liblilv-dev \
+            libgtkmm-2.4-dev \
+            libjack-jackd2-dev \
+            libogg-dev \
+            libcppunit-dev \
+            libudev-dev \
+            libwebsockets-dev \
+            libusb-dev \
+            libsuil-dev \
+            libdbus-1-dev \
+            xjadeo \
+            libusb-1.0-0-dev \
+            libreadline-dev \
+            libarchive-dev \
+            liblo-dev \
+            libtag1-dev \
+            libvamp-sdk2v5 \
+            librubberband-dev \
+            libaubio-dev \
+            libpangomm-1.4-dev \
+            libserd-dev \
+            libsord-dev \
+            libsratom-dev \
+            liblilv-dev \
+            libgtkmm-2.4-dev \
+            libsuil-dev \
+            libcppunit-dev \
+            libpulse-dev
+
+          sudo apt -y install liblrdf0-dev
+          sudo apt -y install libnss3 nss-plugin-pem
+        
+      - name: Print GCC/G++ Version
+        shell: bash
+        run: |
+          gcc --version
+          g++ --version
+
+      - name: Compile
+        shell: bash
+        run: |
+          cd ${{ github.workspace }}/src
+          ./waf configure --strict --prefix=/usr --configdir=/etc --libjack=weak --ptformat --with-backends=jack,alsa,pulseaudio,dummy --optimize --cxx11
+          ./waf -j$(nproc)
+
+      - name: Package
+        shell: bash
+        run: |
+          cd ${{ github.workspace }}/src/tools/linux_packaging
+          ./build --public --harvid
+          ./package --public --singlearch --makeself
+
+      # - name: Upload Binary
+      #   # Ardour-6.8.97-x86_64.run
+      #   shell: bash
+      #   run: |
+      #       TEMP_DOWNLOAD_URL=$(sh ${{ github.workspace }}/ci/services/${{ env.UPLOAD_SERVICE }}.sh ${{ github.workspace }}/tmp/Ardour-*-${{ matrix.config.warch }}-Setup.exe)
+      #       echo Download URL is $TEMP_DOWNLOAD_URL. 
+      # - name: Upload Artifact
+      #   uses: actions/upload-artifact@v2
+      #   with:
+      #     name: Ardour-Cross-Compile-Win-Artifact
+      #     path: |
+      #       ${{ github.workspace }}/tmp/Ardour-*-${{ matrix.config.warch }}-Setup.exe
