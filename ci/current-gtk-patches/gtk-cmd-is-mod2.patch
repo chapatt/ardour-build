@@ -1,0 +1,70 @@
+--- base/gtk+-2.24.23/gdk/quartz/gdkevents-quartz.c	2016-11-19 05:25:55.000000000 -0500
++++ gtk+-2.24.23/gdk/quartz/gdkevents-quartz.c	2016-12-13 05:01:21.000000000 -0500
+@@ -1126,13 +1126,6 @@
+     }
+ 
+   event->key.state |= _gdk_quartz_events_get_current_mouse_modifiers ();
+-
+-  /* The X11 backend adds the first virtual modifier MOD2..MOD5 are
+-   * mapped to. Since we only have one virtual modifier in the quartz
+-   * backend, calling the standard function will do.
+-   */
+-  gdk_keymap_add_virtual_modifiers (NULL, &event->key.state);
+-
+   event->key.string = NULL;
+ 
+   /* Fill in ->string since apps depend on it, taken from the x11 backend. */
+--- base/gtk+-2.24.23/gtk/gtkaccellabel.c	2013-10-16 11:29:55.000000000 -0400
++++ gtk+-2.24.23/gtk/gtkaccellabel.c	2016-12-13 06:17:23.000000000 -0500
+@@ -702,8 +702,13 @@
+     {
+       if (seen_mod)
+ 	g_string_append (gstring, klass->mod_separator);
+-
++      
++#ifndef GDK_WINDOWING_QUARTZ
+       g_string_append (gstring, "Mod2");
++#else
++      /* Command key symbol U+2318 PLACE OF INTEREST SIGN */
++      g_string_append (gstring, "\xe2\x8c\x98");
++#endif
+       seen_mod = TRUE;
+     }
+   if (accelerator_mods & GDK_MOD3_MASK)
+@@ -761,17 +766,7 @@
+       if (seen_mod)
+ 	g_string_append (gstring, klass->mod_separator);
+ 
+-#ifndef GDK_WINDOWING_QUARTZ
+-      /* This is the text that should appear next to menu accelerators
+-       * that use the meta key. If the text on this key isn't typically
+-       * translated on keyboards used for your language, don't translate
+-       * this.
+-       */
+       g_string_append (gstring, C_("keyboard label", "Meta"));
+-#else
+-      /* Command key symbol U+2318 PLACE OF INTEREST SIGN */
+-      g_string_append (gstring, "\xe2\x8c\x98");
+-#endif
+       seen_mod = TRUE;
+     }
+   if (seen_mod)
+@@ -817,7 +812,6 @@
+ 	    }
+ 	}
+     }
+-
+   return g_string_free (gstring, FALSE);
+ }
+ 
+--- base/gtk+-2.24.23/gtk/gtkprivate.h	2013-10-16 11:31:40.000000000 -0400
++++ gtk+-2.24.23/gtk/gtkprivate.h	2016-12-13 05:15:17.000000000 -0500
+@@ -111,7 +111,7 @@
+ #define GTK_DEFAULT_ACCEL_MOD_MASK_VIRTUAL GDK_CONTROL_MASK
+ #else
+ #define GTK_DEFAULT_ACCEL_MOD_MASK GDK_MOD2_MASK
+-#define GTK_DEFAULT_ACCEL_MOD_MASK_VIRTUAL GDK_META_MASK
++#define GTK_DEFAULT_ACCEL_MOD_MASK_VIRTUAL GDK_MOD2_MASK
+ #endif
+ 
+ /* When any of these modifiers are active, a key

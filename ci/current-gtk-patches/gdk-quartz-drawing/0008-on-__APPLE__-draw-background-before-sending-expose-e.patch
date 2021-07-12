@@ -1,0 +1,38 @@
+From 28144369337ddbdfa08981bb5833f72dbc708c1a Mon Sep 17 00:00:00 2001
+From: Paul Davis <paul@linuxaudiosystems.com>
+Date: Wed, 10 Mar 2021 22:52:50 -0700
+Subject: [PATCH 8/8] on __APPLE__, draw background before sending expose
+ events.
+
+See comment in code for more. Also note that the #ifdef is conceptually wrong, since
+this is a quartz/cocoa detail only, and would not apply to a GDK/X11 build on macOS.
+However, this patch is intended for use with the Ardour build stack, and in that
+context it is correct enough. Doing this correctly would require a deeper re-engineering
+of the somewhat tangled mess that GTK double-buffering has created
+---
+ gdk/gdkwindow.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/gdk/gdkwindow.c b/gdk/gdkwindow.c
+index 65528aa..a7582c2 100644
+--- a/gdk/gdkwindow.c
++++ b/gdk/gdkwindow.c
+@@ -5419,6 +5419,15 @@ _gdk_window_process_updates_recurse (GdkWindow *window,
+ 	{
+ 	  GdkEvent event;
+ 
++#ifdef __APPLE__
++	  /* we no longer double-buffer on macOS/quartz, but double-buffering has seeped
++	     into GTK sufficiently that several widgets rely on the background paint that
++	     gdk_window_begin_paint_region() would do. So here we sort-of-explicitly paint
++	     the window directly to provide the same starting point for the window drawing
++	     that will take place as the expose is processed.
++	  */
++	  gdk_window_clear_region_internal (window, expose_region, FALSE);
++#endif
+ 	  event.expose.type = GDK_EXPOSE;
+ 	  event.expose.window = g_object_ref (window);
+ 	  event.expose.send_event = FALSE;
+-- 
+2.20.1 (Apple Git-117)
+

@@ -1,0 +1,22 @@
+diff --git a/gdk/quartz/gdkwindow-quartz.c b/gdk/quartz/gdkwindow-quartz.c
+index 620f46a..76b04ae 100644
+--- a/gdk/quartz/gdkwindow-quartz.c
++++ b/gdk/quartz/gdkwindow-quartz.c
+@@ -342,16 +342,17 @@ static void
+ gdk_window_impl_quartz_end_paint (GdkPaintable *paintable)
+ {
+   GdkWindowImplQuartz *impl = GDK_WINDOW_IMPL_QUARTZ (paintable);
+ 
+   impl->begin_paint_count--;
+ 
+   if (impl->begin_paint_count == 0)
+     {
++      [impl->view setNeedsDisplay:YES];
+       gdk_region_destroy (impl->paint_clip_region);
+       impl->paint_clip_region = NULL;
+     }
+ }
+ 
+ void
+ _gdk_quartz_window_set_needs_display_in_rect (GdkWindow    *window,
+                                               GdkRectangle *rect)

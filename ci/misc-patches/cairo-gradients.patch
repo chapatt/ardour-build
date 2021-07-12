@@ -1,0 +1,28 @@
+diff -ur ../b/cairo-1.14.2/src/cairo.h ./src/cairo.h
+--- ../b/cairo-1.14.2/src/cairo.h	2015-03-10 18:21:07.000000000 -0400
++++ ./src/cairo.h	2015-05-28 13:23:01.871392045 -0400
+@@ -81,6 +81,7 @@
+ 	CAIRO_VERSION_MINOR,				\
+ 	CAIRO_VERSION_MICRO)
+ 
++#define CAIRO_SUPPORTS_FORCE_BUGGY_GRADIENTS_ENVIRONMENT_VARIABLE 1
+ 
+ cairo_public int
+ cairo_version (void);
+diff -ur ../b/cairo-1.14.2/src/cairo-xlib-display.c ./src/cairo-xlib-display.c
+--- ../b/cairo-1.14.2/src/cairo-xlib-display.c	2015-03-10 18:21:07.000000000 -0400
++++ ./src/cairo-xlib-display.c	2015-05-28 13:20:19.970050882 -0400
+@@ -266,7 +266,12 @@
+ #if RENDER_MAJOR == 0 && RENDER_MINOR < 10
+     display->buggy_gradients = TRUE;
+ #else
+-    display->buggy_gradients = FALSE;
++    if (getenv ("FORCE_BUGGY_GRADIENTS")) {
++        display->buggy_gradients = TRUE;
++    }
++    else {
++        display->buggy_gradients = FALSE;
++    }
+ #endif
+     display->buggy_pad_reflect = FALSE;
+     display->buggy_repeat = FALSE;

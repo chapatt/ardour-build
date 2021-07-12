@@ -1,0 +1,115 @@
+name: Ardour Cross Compile Build
+
+on:
+  push:
+    branches: [ macos ]
+  pull_request:
+    branches: [ macos ]
+  repository_dispatch:
+    types: ardour-macos-build
+
+env:
+  ARDOUR_VERSION: 6.8
+  # available upload services: wetransfer.com, file.io, 0x0.st
+  UPLOAD_SERVICE: wetransfer.com
+  # https://community.ardour.org/srctar
+  # https://fossies.org/linux/misc/Ardour-6.8.0.tar.bz2
+
+jobs:
+  ardour-build:
+    name: Ardour Build for MacOS ${{ matrix.config.arch }}
+    runs-on: macos-10.15
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {
+              arch: x86_64
+            }
+          # - {
+          #     arch: arm64
+          #   }
+    steps:
+      
+      - name: Using curl with openssl
+        shell: bash
+        run: |
+          brew rm curl
+          brew update
+          brew install curl-openssl
+
+      - name: Checkout Build Tools
+        uses: actions/checkout@v2
+        with:
+          repository: ${{ github.repository }}
+          fetch-depth: 0
+          ref: linux
+          path: '.'
+
+      - name: Get Ardour Latest Release Source Code
+        uses: actions/checkout@v2
+        with:
+          repository: 'Ardour/ardour'
+          fetch-depth: 1
+          ref: ${{ env.ARDOUR_VERSION }}
+          path: './src'
+        
+      - name: Print Clang Version
+        shell: bash
+        run: |
+          clang --version
+
+      - name: Prepare
+        shell: bash
+        run: |
+          chmod a+x ${{ github.workspace }}/ci/waf
+          chmod a+x ${{ github.workspace }}/ci/rb-wscript
+          chmod a+x ${{ github.workspace }}/ci/vamp-wscript
+
+      - name: Set env
+        shell: bash
+        run: |
+          echo "HOME=${{ github.workspace }}/macos-${{ matrix.config.arch }}" >> $GITHUB_ENV
+          echo "PATH=/usr/lib/ccache:${{ github.workspace }}/macos-${{ matrix.config.arch }}/bin:${{ github.workspace }}/macos-${{ matrix.config.arch }}/gtk/inst/bin/:$PATH" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=${{ github.workspace }}/macos-${{ matrix.config.arch }}/gtk/inst/lib/pkgconfig/:/usr/lib/i386-linux-gnu/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig/" >> $GITHUB_ENV
+          echo "PYTHONPATH=./:${{ github.workspace }}/macos-${{ matrix.config.arch }}/gtk/inst/lib/python`python --version 2>&1 | cut -d ' ' -f 2 | cut -b 1-3`/site-packages/" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/macos-${{ matrix.config.arch }}/gtk/inst/lib/" >> $GITHUB_ENV
+      
+      - name: Print env
+        shell: bash
+        run: |
+          env
+
+      - name: Install Build Stack
+        shell: bash
+        run: |
+          bash ${{ github.workspace }}/ci/build-stack
+
+      - name: Compile
+        # --depstack-root defaults to ~ 
+        shell: bash
+        run: |
+          cd ${{ github.workspace }}/src
+          python3 ./waf configure --strict --with-backends=jack,coreaudio,dummy --ptformat --optimize
+          python3 ./waf -j$(nproc)
+          python3 ./waf install
+
+      - name: Package
+        shell: bash
+        run: |
+          cd ${{ github.workspace }}/src/tools/osx_packaging
+          bash ./osx_build --nls --public
+
+      - name: Upload Binary
+        # ${{ github.workspace }}/src/tools/osx_packaging/Ardour-6.8.104.dmg
+        shell: bash
+        run: |
+            TEMP_DOWNLOAD_URL=$(sh ${{ github.workspace }}/ci/services/${{ env.UPLOAD_SERVICE }}.sh ${{ github.workspace }}/src/tools/osx_packaging/Ardour-*.dmg)
+            echo Download URL is $TEMP_DOWNLOAD_URL
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: Ardour-Linux-Artifact
+          path: |
+            ${{ github.workspace }}/src/tools/osx_packaging/Ardour-*.dmg

@@ -1,0 +1,1698 @@
+#!/usr/bin/env bash
+
+#
+# THIS SCRIPT EXISTS FOR THE PURPOSE OF BUILDING THE ENTIRE STACK UP UPON WHICH ARDOUR DEPENDS
+#
+# Its use is not documented, and it is not intended to be used or useful to anyone attempting to build
+# Ardour.
+#
+# The requirements for building Ardour are made clear in the documentation on building available
+# via http://ardour.org/development. Once your system satisfies those requirements, you can build ardour
+# using the instructions documented online. This script happens to be usable to satisfy those requirements,
+# but there are other approaches that you can and probably should use to do so.
+#
+
+# On a pristine minimal debian system the following packages are needed as prerequisites:
+#
+# apt-get install git build-essential wget python python-dev libxml-parser-perl file \
+#                 libx11-dev libx11-xcb-dev libxext-dev libxrender-dev ocaml-nox gperf
+# sys-dependent:  ## libxcb-render0-dev libxcb1-dev libxcb-shm0-dev
+# later (ardour)  libasound-dev libjack-dev ladspa-sdk makeself chrpath mawk
+
+clean=
+printversions=
+overridepath=
+makespace=
+weakjack=
+parallel=2
+patch_gtk_osx=
+PREFIX=$HOME/gtk/inst
+unpatch=
+target_mods=
+GTK_DOC_MODE=
+OSX_TARGET=
+SRCCACHE=/var/tmp/src_cache/
+
+if test -d current-gtk-patches -o -f build-stack; then
+	echo "You should not run this script in the same folder."
+	echo "Run this script in a dedicated build directory. eg."
+	echo "mkdir /tmp/build; cd /tmp/build; `pwd`/build-stack"
+	exit
+fi
+
+OSX=
+GLOBAL_CPPFLAGS=""
+GLOBAL_CFLAGS="-O3 -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64"
+GLOBAL_CXXFLAGS="-O3 -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64"
+GLOBAL_PREFIX="--prefix=$PREFIX"
+GLOBAL_CONF="$GLOBAL_PREFIX"
+GLOBAL_LDFLAGS=""
+
+# allow to override any of the above on a per-host, per-user basis
+if test -f $HOME/.ardour-build-stack.rc ; then
+	. $HOME/.ardour-build-stack.rc
+fi
+
+pushd "`/usr/bin/dirname \"$0\"`" > /dev/null; this_script_dir="`pwd`"; popd > /dev/null
+
+function die () {
+    echo $*
+    exit 1
+}
+
+function fetch_as () {
+    if [ -f $1 ] ; then
+        return
+    fi
+    echo "--- Downloading.. $2"
+    if uname -a | grep --silent arwin ; then
+        curl -L -o $1 $2
+    else
+        wget --no-check-certificate -O $1 $2
+    fi
+}
+
+function defmod {
+    if [ $# -ne 4 -a $# -ne 6 -a $# -ne 5 ] ; then
+        echo "Incorrect number of arguments ($#) passed to defmod (5, 6 or 7) for $1"
+        exit 1
+    fi
+
+    name=$1 ; shift
+
+    if [ x$target_mods != x ] ; then
+        if echo $target_mods | grep --silent $name ; then
+            :
+        else
+            echo "Skipping $name ..."
+            return
+        fi
+    fi
+
+    need_unpacked=1
+
+    if [ $# -eq 3 ] ; then
+        eval "MOD_${name}_name=\"$name\""
+        eval "MOD_${name}_version=\"$1\"" ; shift
+        eval "MOD_${name}_source=\"$1\"" ; shift
+        eval "MOD_${name}_compression=\"$1\"" ; shift
+    elif [ $# -eq 4 ] ; then
+        eval "MOD_${name}_name=\"$1\"" ; shift
+        eval "MOD_${name}_version=\"$1\"" ; shift
+        eval "MOD_${name}_source=\"$1\"" ; shift
+        eval "MOD_${name}_compression=\"$1\"" ; shift
+    elif [ $# -eq 5 ] ; then
+        eval "MOD_${name}_name=\"$1\"" ; shift
+        eval "MOD_${name}_version=\"$1\"" ; shift
+        eval "MOD_${name}_source=\"$1\"" ; shift
+        eval "MOD_${name}_compression=\"$1\"" ; shift
+        eval "MOD_${name}_unpacked=\"$1\""; shift
+        need_unpacked=0
+    fi
+
+    eval "if [ x\"\$MOD_${name}_version\" = x ] ; then \
+             MOD_${name}_wholename=\"\$MOD_${name}_name\" ; \
+          else \
+             MOD_${name}_wholename=\"\$MOD_${name}_name-\$MOD_${name}_version\"; \
+          fi"
+
+    if [ $need_unpacked = 1 ] ; then
+        eval "MOD_${name}_unpacked=\$MOD_${name}_wholename"
+    fi
+
+    eval "MOD_${name}_url=\$MOD_${name}_source\$MOD_${name}_wholename.tar.\$MOD_${name}_compression"
+    eval "MOD_${name}_local_tarball=${SRCCACHE}\`basename \$MOD_${name}_url\`"
+
+    MODS="$MODS $name"
+}
+
+function gitmod {
+    eval "MOD_${1}_name=\"$1\""
+    eval "MOD_${1}_version=\"$2\""
+    eval "MOD_${1}_unpacked=\"${1}-${2}\""
+    eval "MOD_${1}_url=\"${3}/${1}/archive/${2}.tar.gz\""
+    eval "MOD_${1}_local_tarball=\"${SRCCACHE}${1}-${2}.tar.gz\""
+    MODS="$MODS $1"
+}
+
+function built() {
+    m=$1
+    built=1 # false in shell terms
+
+    # if it already unpacked, assume it is built
+    eval "if [ -d \$MOD_${m}_unpacked ] ; then \
+            built=0 ;
+          fi"
+
+    return $built
+}
+
+function basic_buildonly() {
+    m=$1
+    (
+	CXXFLAGS="$GLOBAL_CXXFLAGS -I${PREFIX}/include/" \
+	CPPFLAGS="$GLOBAL_CPPFLAGS -I${PREFIX}/include/" \
+	CFLAGS="$GLOBAL_CFLAGS -I${PREFIX}/include/" \
+	LDFLAGS="$GLOBAL_LDFLAGS -L${PREFIX}/lib/" \
+	    ./configure $GLOBAL_CONF \
+	&& make $MAKEFLAGS \
+	&& make install \
+    ) || die $m build failed
+}
+
+
+function basic_builder() {
+    m=$1
+
+    if built $m ; then
+        return
+    fi
+
+    echo "=== $m"
+    # get busy ...
+    (
+    eval "tar xf \$MOD_${m}_local_tarball && cd \$MOD_${m}_unpacked"
+    basic_buildonly $m
+    )
+}
+
+function waf_buildonly() {
+    # note: for OSX and waf > 1.8 we need to explicily ask for gcc,g++ (waf defaults to clang on OSX)
+    # on for OSX > 10.8, gcc is a symlink to clang, OSX < 10.8 ship an ancient clang
+    m=$1
+    shift
+    (set -e \
+	&&  CC=gcc CXX=g++ \
+	CXXFLAGS="$GLOBAL_CFLAGS $CXXFLAGS" \
+	CFLAGS="$GLOBAL_CFLAGS" \
+	LINKFLAGS="$GLOBAL_LDFLAGS" \
+	./waf configure $GLOBAL_PREFIX $@ \
+	&& ./waf build \
+	&& ./waf install \
+	&& fix_install_name $PREFIX/lib/lib${m}-0.dylib \
+    ) || die $m build failed
+}
+
+function waf_builder() {
+    m=$1
+
+    if built $m ; then
+        return;
+    fi
+
+    (
+    eval "tar xf \$MOD_${m}_local_tarball && cd \$MOD_${m}_unpacked"
+    waf_buildonly $@
+    )
+}
+
+
+function fix_install_name () {
+    #
+    # this is a temporary hack to deal with the fact that the
+    # version of waf used by the LV2 stack does not correctly
+    # set the install name of those libraries. Once that is
+    # fixed in a release version, this function and its
+    # uses can be removed.
+    #
+    if [ x$OSX != x ] ; then
+       test -f "$1" && install_name_tool -id $1 $1 || true
+    fi
+}
+
+# END OF FUNCTION DEFINITIONS
+################################################################################
+
+OSX_VERSION=0
+SW_VERS=0
+
+if uname -a | grep --silent arwin ; then
+    kernel=`uname -a | cut -d' ' -f3`
+    case $kernel in
+        [0-7]\.*) osx_host=panther ;;
+        8\.*)     osx_host=tiger ;;
+        9\.*)     osx_host=leopard ;;
+        10\.*)    osx_host=snowleopard ;;
+        11\.*)    osx_host=lion ;;
+        12\.*)    osx_host=mountainlion ;;
+        13\.*)    osx_host=mavericks ;;
+        14\.*)    osx_host=yosemite ;;
+        15\.*)    osx_host=elcapitan ;;
+        16\.*)    osx_host=sierra ;;
+        17\.*)    osx_host=highsierra ;;
+        18\.*)    osx_host=mojave ;;
+        19\.*)    osx_host=catalina ;;
+        20\.*)    osx_host=bigsur ;;
+        *) ;;
+    esac
+    OSX_VERSION=`echo $kernel | cut -d. -f 1`
+    SW_VERS=$(sw_vers -productVersion 2>/dev/null | cut -d '.' -f 2)
+
+# Newer versions of OS X require us to specify which C++ stdlib we are using
+    case $osx_host in
+        mavericks)
+            GLOBAL_LDFLAGS="$GLOBAL_LDFLAGS --stdlib=libstdc++"
+            GLOBAL_CXXFLAGS="$GLOBAL_CXXFLAGS --stdlib=libstdc++ -Wno-error=unused-command-line-argument"
+            GLOBAL_CPPFLAGS="$GLOBAL_CPPFLAGS -Wno-error=unused-command-line-argument"
+            GLOBAL_CFLAGS="$GLOBAL_CFLAGS -Wno-error=unused-command-line-argument"
+            ;;
+        yosemite|elcapitan|sierra|highsierra|mojave|catalina)
+            GLOBAL_LDFLAGS="$GLOBAL_LDFLAGS --stdlib=libc++"
+            GLOBAL_CXXFLAGS="$GLOBAL_CXXFLAGS --stdlib=libc++ -Wno-error=unused-command-line-argument"
+            GLOBAL_CPPFLAGS="$GLOBAL_CPPFLAGS -Wno-error=unused-command-line-argument"
+            GLOBAL_CFLAGS="$GLOBAL_CFLAGS -Wno-error=unused-command-line-argument"
+            ;;
+    esac
+    
+    # Set default target to host
+    OSX_TARGET=$osx_host
+fi
+
+# parse options
+while [ $# -gt 0 ] ; do
+    case $1 in
+        --checkurls) CHECKURLS=1 ; shift ;;
+        --clean*) clean=1 ; shift ;;
+        --space*) makespace=1 ; shift ;;
+        --weakjack*) weakjack=1 ; shift ;;
+        --prefix*) PREFIX=`echo $1 | sed 's/--prefix=//'` ; shift ;;
+        --patch*) patch=1 ; shift ;;
+        --unpatch*) patch=1 ; unpatch=-R; shift ;;
+        --target) target_mods="$target_mods $1"; shift ;;
+        --tarballs) GTK_DOC_MODE="--enable-gtk-doc"; shift ;;
+        --dump*) printversions=1; shift ;;
+        --overridepath) overridepath=1; shift ;;
+        -j*) parallel=`echo $1 | sed 's/-j//'` ; shift ;;
+        --osx-target*) OSX_TARGET=`echo $1 | sed 's/--osx-target=//'` ; shift ;;
+        *) echo "Unknown argument $1" ; exit 1 ;;
+    esac
+done
+
+# DEFINING MODULES
+#
+# 3 possible formats
+#
+# NAME VERSION URL_FOR_DOWNLOAD_DIR COMPRESSION_TYPE
+# NAME PACKAGE_NAME VERSION URL_FOR_DOWNLOAD_DIR COMPRESSION_TYPE
+# NAME PACKAGE_NAME VERSION URL_FOR_DOWNLOAD_DIR COMPRESSION_TYPE UNPACKED_NAME
+#
+# the first form is the most common
+# the second form is required where the package name includes characters not allowed
+#    in shell variables. here, the first NAME should define a legal shell variable name
+# the third form is required for libjpeg whose packaging and naming is totally inconsistent
+#    with normal practice
+#
+defmod 'xz' '5.2.2' "http://tukaani.org/xz/" 'bz2'
+defmod 'tar' '1.27' "http://ftpmirror.gnu.org/tar/" 'bz2'
+defmod 'libarchive' '3.2.1' "http://www.libarchive.org/downloads/" 'gz'
+defmod 'm4' '1.4.18' "http://ftpmirror.gnu.org/m4/" 'bz2'
+defmod 'autoconf' '2.69' "http://ftpmirror.gnu.org/autoconf/" 'xz'
+defmod 'automake' '1.14.1' "http://ftpmirror.gnu.org/automake/" 'gz'
+defmod 'libtool' '2.4.2' 'http://ftpmirror.gnu.org/libtool/' 'gz'
+defmod 'cmake' '2.8.12.2' 'http://www.cmake.org/files/v2.8/' 'gz'
+defmod 'cmake3' 'cmake' '3.18.4' 'http://www.cmake.org/files/v3.18/' 'gz' 'cmake-3.18.4'
+defmod 'make' '4.1' 'http://ftpmirror.gnu.org/make/' 'bz2'
+defmod 'flex' '2.5.35' 'http://ardour.org/files/deps/' 'gz'
+defmod 'bison' '3.0' 'http://ftpmirror.gnu.org/bison/' 'xz'
+defmod 'glib' '2.42.0' 'http://ftp.gnome.org/pub/gnome/sources/glib/2.42/' 'xz'
+defmod 'pkgconfig' 'pkg-config' '0.28' 'http://pkgconfig.freedesktop.org/releases/' 'gz'
+defmod 'termcap' '1.3.1' 'http://ftpmirror.gnu.org/termcap/' 'gz'
+defmod 'readline' '6.3' 'http://ftpmirror.gnu.org/readline/' 'gz'
+defmod 'zlib' '1.2.7' 'ftp://ftp.simplesystems.org/pub/libpng/png/src/history/zlib/' 'bz2'
+defmod 'libiconv' '1.14' 'http://ftpmirror.gnu.org/libiconv/' 'gz'
+defmod 'gettext' '0.19.3' 'http://ftpmirror.gnu.org/gettext/' 'gz'
+defmod 'expat' '2.4.1' 'https://sourceforge.net/projects/expat/files/expat/2.4.1/' 'gz'
+# defmod 'expat' '2.1.0-RENAMED-VULNERABLE-PLEASE-USE-2.3.0-INSTEAD' 'https://sourceforge.net/projects/expat/files/expat/2.1.0/' 'gz'
+defmod 'libxml2' '2.9.2' 'ftp://xmlsoft.org/libxslt/' 'gz'
+defmod 'libxslt' '1.1.28' 'ftp://xmlsoft.org/libxslt/' 'gz'
+defmod 'tiff' '4.0.3' 'http://download.osgeo.org/libtiff/old/' 'gz'
+defmod 'libpng' '1.6.37' 'http://downloads.sourceforge.net/project/libpng/libpng16/1.6.37/' 'xz'
+defmod 'jpeg' 'jpegsrc.v9a' '' 'http://www.ijg.org/files/' 'gz' 'jpeg-9a'
+defmod 'itstool' '2.0.2' 'http://files.itstool.org/itstool/' bz2
+defmod 'atk' '2.14.0' 'http://ftp.gnome.org/pub/GNOME/sources/atk/2.14/' 'xz'
+defmod 'gnomecommon' 'gnome-common' '2.34.0' 'http://ftp.acc.umu.se/pub/gnome/sources/gnome-common/2.34/' 'bz2'
+defmod 'gtkdoc' 'gtk-doc' '1.21' 'http://ftp.gnome.org/pub/GNOME/sources/gtk-doc/1.21/' 'xz'
+defmod 'gnomedocutils' 'gnome-doc-utils' '0.20.10' 'http://ftp.acc.umu.se/pub/gnome/sources/gnome-doc-utils/0.20/' 'xz'
+defmod 'pixman' '0.38.4' 'http://www.cairographics.org/releases/' 'gz'
+defmod 'libffi' '3.1' 'ftp://sourceware.org/pub/libffi/' 'gz'
+defmod 'freetype' '2.9' 'http://downloads.sourceforge.net/project/freetype/freetype2/2.9/' 'bz2'
+defmod 'fontconfig' '2.13.1' 'http://www.freedesktop.org/software/fontconfig/release/' 'bz2'
+defmod 'cairo' '1.14.12' 'http://cairographics.org/releases/' 'xz'
+defmod 'harfbuzz' '0.9.35' 'http://www.freedesktop.org/software/harfbuzz/release/' 'bz2'
+defmod 'pango' '1.40.4' 'http://ftp.gnome.org/pub/GNOME/sources/pango/1.40/' 'xz'
+defmod 'gdkpixbuf' 'gdk-pixbuf' '2.31.1' 'http://ftp.gnome.org/pub/GNOME/sources/gdk-pixbuf/2.31/' 'xz'
+defmod 'intltool' '0.50.2' 'http://launchpad.net/intltool/trunk/0.50.2/+download/' 'gz'
+defmod 'gtkosxdocbook' 'gtk-osx-docbook' '1.0' 'http://downloads.sourceforge.net/project/gtk-osx/GTK-OSX%20Build/' 'gz'
+defmod 'gobjectintrospection' 'gobject-introspection' '1.38.0' 'http://ftp.gnome.org/pub/GNOME/sources/gobject-introspection/1.38/' 'xz'
+defmod 'gtkengines' 'gtk-engines' '2.21.0' 'http://ardour.org/files/' 'gz'
+defmod boost boost_1_68_0 '' http://sourceforge.net/projects/boost/files/boost/1.68.0/ bz2 boost_1_68_0
+#gitmod fftw3 119aa4c4a893f32dfd837a84fac9453b6dae6680 https://github.com/FFTW
+defmod fftw 3.3.8 http://fftw.org/  gz
+defmod glibmm 2.42.0 http://ftp.gnome.org/pub/GNOME/sources/glibmm/2.42/ xz
+defmod cairomm 1.11.2 http://cairographics.org/releases/ gz
+defmod pangomm 2.34.0 http://ftp.acc.umu.se/pub/gnome/sources/pangomm/2.34/ xz
+defmod atkmm 2.22.7 http://ftp.gnome.org/pub/GNOME/sources/atkmm/2.22/ xz
+defmod gtkmm 2.24.4 http://ftp.acc.umu.se/pub/GNOME/sources/gtkmm/2.24/ xz
+defmod libart_lgpl 2.3.21 http://ftp.gnome.org/pub/gnome/sources/libart_lgpl/2.3/ bz2
+defmod liblo 0.28 http://downloads.sourceforge.net/liblo/ gz
+defmod raptor2 2.0.14 http://download.librdf.org/source/ gz
+defmod rasqal 0.9.32 http://download.librdf.org/source/ gz
+defmod redland 1.0.17 http://download.librdf.org/source/ gz
+defmod libogg 1.3.2 http://downloads.xiph.org/releases/ogg/ xz
+defmod flac 1.3.2 http://downloads.xiph.org/releases/flac/ xz
+defmod libvorbis 1.3.4 http://downloads.xiph.org/releases/vorbis/ xz
+defmod libsamplerate 0.1.9 http://www.mega-nerd.com/SRC/ gz
+defmod opus 1.3.1 https://archive.mozilla.org/pub/opus/ gz
+defmod aubio 0.3.2 http://aubio.org/pub/ gz
+gitmod rdflib 4.1.2 https://github.com/RDFLib
+gitmod LRDF 0.5.1-rg https://github.com/x42
+defmod pcre 8.36 http://downloads.sourceforge.net/project/pcre/pcre/8.36/ bz2
+defmod serd serd 0.30.11-g36f1cecc http://ardour.org/files/deps/ bz2 serd-0.30.11
+defmod sord sord 0.16.9-gd2efdb2 http://ardour.org/files/deps/ bz2 sord-0.16.9
+defmod sratom sratom 0.6.8-gc46452c http://ardour.org/files/deps/ bz2 sratom-0.6.8
+defmod lilv lilv 0.24.13-g71a2ff5 http://ardour.org/files/deps/ bz2 lilv-0.24.13
+defmod suil suil 0.10.8-g05c2afb http://ardour.org/files/deps/ bz2 suil-0.10.8
+defmod lv2 lv2 1.18.2-g611759d http://ardour.org/files/deps/ bz2 lv2-1.18.2
+defmod curl 7.66.0 https://curl.haxx.se/download/ xz
+defmod taglib 1.9.1 http://taglib.github.io/releases/ gz
+defmod libwebsockets 4.0.15 http://ardour.org/files/deps/ gz
+defmod vamp vamp-plugin-sdk 2.8.0 https://code.soundsoftware.ac.uk/attachments/download/2450/ gz
+#defmod vamp vamp-plugin-sdk 2.9.0 https://code.soundsoftware.ac.uk/attachments/download/2588/ gz # vamp 2.9 need c++11
+defmod rubberband 1.8.1 http://code.breakfastquay.com/attachments/download/34/ bz2
+defmod cppunit 1.13.2 http://dev-www.libreoffice.org/src/ gz
+defmod libsndfile libsndfile 1.0.27 http://www.mega-nerd.com/libsndfile/files/ gz
+defmod libusb 1.0.20 http://downloads.sourceforge.net/project/libusb/libusb-1.0/libusb-1.0.20/ bz2
+defmod nss nss-3.45-with-nspr-4.21 '' https://ftp.mozilla.org/pub/security/nss/releases/NSS_3_45_RTM/src/ gz nss-3.45
+defmod nsspem nss-pem-1.0.2 '' http://ardour.org/files/deps/ xz
+
+if ! uname -a | grep --silent arwin ; then
+    defmod util_linux util-linux 2.21 http://www.kernel.org/pub/linux/utils/util-linux/v2.21/ xz
+else
+    defmod uuid 1.6.2 http://www.mirrorservice.org/sites/ftp.ossp.org/pkg/lib/uuid/ gz
+fi
+
+defmod libsigcpp libsigc++ 2.4.1 http://ftp.gnome.org/pub/GNOME/sources/libsigc++/2.4/ xz
+
+current_gtk_version='2.24.23'
+current_gtk_ardour_patch_level=6
+
+if uname -a | grep --silent arwin ; then
+    defmod gtk gtk+ "$current_gtk_version-quartz-ardour$current_gtk_ardour_patch_level" http://ardour.org/files/deps/ bz2 "gtk+-$current_gtk_version"
+else
+    defmod gtk gtk+ "$current_gtk_version-x11-ardour$current_gtk_ardour_patch_level" http://ardour.org/files/deps/ bz2 "gtk+-$current_gtk_version"
+fi
+
+################################################################################
+
+if test -n "$CHECKURLS"; then
+	echo "Testing download URLs.."
+	for m in $MODS ; do
+		echo -n "$m "
+		eval "curl --output /dev/null --silent --fail -r 0-1024 \$MOD_${m}_url || die \"downloading $m failed\""
+		echo
+	done
+	echo "Done."
+	exit
+fi
+
+################################################################################
+
+if [ x$clean != x -o x$makespace != x ] ; then
+    if [ ! -d xz-5.0.7 ] ; then
+        echo "This doesn't appear to be your source directory. Don't run --clean or --space here."
+        exit 1
+    fi
+    rm -rf `find . -maxdepth 1 -type d | grep -v -e "^.$" | grep -v -e ".git$" | grep -v -e ".git.reference$"`
+    if [ $clean ] ; then
+        rm -rf $PREFIX
+        rm -rf ~/a3 # old stack
+    fi
+    exit 0
+fi
+
+mkdir -p $PREFIX
+export MAKEFLAGS=-j$parallel
+
+if test -n "$overridepath"; then
+	export PATH=$HOME/bin:$PREFIX/bin:/usr/local/git/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+else
+	export PATH=$HOME/bin:$PREFIX/bin:$PATH
+fi
+
+if uname -a | grep --silent arwin ; then
+	export PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig
+else
+	# on linux we pull in XCB support..
+	export PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
+fi
+
+# Check Perl
+PERLVERSION=`perl -e 'printf "%vd\n", $^V;'`
+
+# Check Python presence
+PYVERS=`python --version 2>&1 | cut -d ' ' -f 2 | cut -b 1-3`
+export PYTHONPATH=$PREFIX/lib/python${PYVERS}/site-packages/:${PYTHONPATH:+:$PYTHONPATH}
+mkdir -p $PREFIX/lib/python${PYVERS}/site-packages/
+
+
+if python --version 2>&1 | egrep --silent '(2\.7|2\.6)' ; then
+    :
+else
+    echo "You need at least Python 2.6 or 2.7 to run this script"
+    exit 1
+fi
+
+if uname -a | grep --silent arwin ; then
+    # its OS X! run for the hills !!
+
+    OSX=1
+    GLOBAL_LDFLAGS="$GLOBAL_LDFLAGS -headerpad_max_install_names"
+    PANGO_CONF="--without-x"
+
+    # Not clear why Apple uses different version formats for MAX_OS_X_VERSION_*
+    # and -mmacosx-version-min, but ... oh well.
+
+    case $OSX_TARGET in
+
+        tiger)
+            GLOBAL_CFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1040 -mmacosx-version-min=10.4 $GLOBAL_CFLAGS"
+            GLOBAL_CXXFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1040 -mmacosx-version-min=10.4 $GLOBAL_CXXFLAGS"
+            ;;
+
+        lion)
+            GLOBAL_CFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1070 -mmacosx-version-min=10.4 $GLOBAL_CFLAGS"
+            GLOBAL_CXXFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1070 -mmacosx-version-min=10.4 GLOBAL_CXXFLAGS"
+            ;;
+
+        mountainlion)
+            GLOBAL_CFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1080 -mmacosx-version-min=10.8 $GLOBAL_CFLAGS"
+            GLOBAL_CXXFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1080 -mmacosx-version-min=10.8 $GLOBAL_CXXFLAGS"
+            ;;
+
+        leopard)
+            GLOBAL_CFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1050 -mmacosx-version-min=10.5 $GLOBAL_CFLAGS"
+            GLOBAL_CXXFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1050 -mmacosx-version-min=10.5 $GLOBAL_CXXFLAGS"
+            ;;
+
+        snowleopard)
+            GLOBAL_CFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1060 -mmacosx-version-min=10.6 $GLOBAL_CFLAGS"
+            GLOBAL_CXXFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1060 -mmacosx-version-min=10.6 $GLOBAL_CXXFLAGS"
+            ;;
+
+        mavericks)
+            GLOBAL_CFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1090 -mmacosx-version-min=10.8 $GLOBAL_CFLAGS"
+            GLOBAL_CXXFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1090 -mmacosx-version-min=10.8 $GLOBAL_CXXFLAGS"
+            GLOBAL_LDFLAGS="$GLOBAL_LDFLAGS"
+            ;;
+
+        yosemite|elcapitan|sierra|highsierra|mojave|catalina)
+            GLOBAL_CFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1090 -mmacosx-version-min=10.9 $GLOBAL_CFLAGS"
+            GLOBAL_CXXFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1090 -mmacosx-version-min=10.9 $GLOBAL_CXXFLAGS"
+            GLOBAL_LDFLAGS="$GLOBAL_LDFLAGS"
+            ;;
+
+        bigsur)
+            ;;
+
+        i386)
+            GLOBAL_CFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1050 -mmacosx-version-min=10.5 -arch i386 $GLOBAL_CFLAGS"
+            GLOBAL_CXXFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1050 -mmacosx-version-min=10.5 -arch i386 $GLOBAL_CXXFLAGS"
+            GLOBAL_CONF="$GLOBAL_CONF --target=i386-apple-darwin --host=i386-apple-darwin"
+            GLOBAL_LDFLAGS="$GLOBAL_LDFLAGS -arch i386"
+            CMAKE_FLAGS="-DCMAKE_OSX_ARCHITECTURES=i386"
+            PANGO_CONF="--without-x"
+            export ARCHFLAGS="-arch i386"
+            export VERSIONER_PYTHON_PREFER_32_BIT=yes
+            ;;
+
+
+        ppc)
+            GLOBAL_CFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1050 -mmacosx-version-min=10.5 -arch ppc $GLOBAL_CFLAGS"
+            GLOBAL_CXXFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1050 -mmacosx-version-min=10.5 -arch ppc $GLOBAL_CXXFLAGS"
+            GLOBAL_CONF="$GLOBAL_CONF --target=ppc-apple-darwin --host=ppc-apple-darwin"
+            GLOBAL_LDFLAGS="$GLOBAL_LDFLAGS -arch ppc"
+            CMAKE_FLAGS="-DCMAKE_OSX_ARCHITECTURES=ppc"
+            PANGO_CONF="--without-x --with-included-modules=yes"
+            export ARCHFLAGS="-arch ppc"
+            export VERSIONER_PYTHON_PREFER_32_BIT=yes
+            ;;
+
+        "") ;;
+
+        *) echo "Unknown OS X target ($OSX_TARGET). Use \"tiger\", \"lion\" or \"mountainlion\"" ; exit 1 ;;
+    esac
+
+    # tell perl to look in our $PREFIX tree for additional perl modules
+    export PERL5LIB=$PREFIX/System/Library/Perl/$PERLVERSION
+
+    export DYLD_FALLBACK_LIBRARY_PATH=$PREFIX/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}
+
+    # in theory, we should be using the following flags to identify the OS X SDK
+    # we are targetting. The problem is that Apple no longer distributes
+    # old SDK's as part of their development tools, so it is not possible
+    # to use (for example) 10.4 as a target on a 10.8 system.
+    #
+    # this should really be a better a solution, but as noted, isn't practical
+    # as long as we target 10.4 or any other SDK that is no longer distributed.
+    #
+    # for 10.5 and above, add to LDFLAGS
+    # "-syslibroot /Developer/SDKs/MacOSX10.4u.sdk"
+    # for 10.5 and above, add to CFLAGS
+    # -sysroot=/Developer/SDKs/MacOSX10.4u.sdk"
+
+    CAIRO_CONF="--enable-xlib=no --enable-quartz=yes --enable-xcb=no"
+    GTK_BACKEND=quartz
+    AVOID_ICONV=
+    explicit_intl=yes
+
+else
+
+    # tell perl to look in our $PREFIX tree for additional perl modules
+    # Some idiotic Perl modules install into MAJOR.MINOR rather than MAJOR.MINOR.MICRO
+    PERL_STUPIDVERSION=`echo $PERLVERSION | sed 's/\.[0-9][0-9]*$//'`
+    export PERL5LIB=$PREFIX/lib/perl/$PERLVERSION:$PREFIX/lib/perl/$PERL_STUPIDVERSION:$PREFIX/share/perl/$PERLVERSION:$PREFIX/share/perl/$PERL_STUPIDVERSION
+
+    export LD_LIBRARY_PATH=$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+    GLOBAL_LDFLAGS=
+    CAIRO_CONF="--enable-xlib --disable-gl --disable-xlib-xcb --enable-xcb --enable-xcb-shm"
+    PANGO_CONF=
+    GTK_BACKEND=x11
+    AVOID_ICONV="--with-libiconv=no"
+
+    # https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Dialect-Options.html
+    #GLOBAL_CXXFLAGS="-fabi-version=9 -std=gnu++11" // G++ 5.2 ABI compat
+
+		# gettext needs awk, but system-wide awk may not work with
+		# custom libreadline in $LD_LIBRARY_PATH
+		if test -n "`which mawk`"; then
+			export AWK=`which mawk`
+			mkdir -p $PREFIX/bin
+			ln -s `which mawk` $PREFIX/bin/awk || true
+		fi
+
+		# we need libxcb, xcb-shm etc from the OS.
+		PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig/:/usr/lib/i386-linux-gnu/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig/
+
+    # normal linux platforms won't need this
+    explicit_intl=
+fi
+
+if test -n "$printversions"; then
+	(
+	for m in $MODS ; do
+		eval "echo -n \$MOD_${m}_name"
+		echo -n " "
+		echo -n "<li><a href=\""
+		eval "echo -n \$MOD_${m}_url"
+		echo -n "\">"
+		eval "echo -n \$MOD_${m}_name"
+		echo -n " "
+		eval "echo -n \$MOD_${m}_version"
+		echo "</a></li>"
+	done
+	) | sort -f | cut -d ' ' -f 2-
+	exit
+fi
+
+################################################################################
+# ALL SYSTEMS GO - get and prepare sources
+
+set -e
+
+if test -f ${SRCCACHE}.lock; then
+	echo "${SRCCACHE}.lock file found."
+	echo "Likley another build-stack script is running."
+	exit
+fi
+
+if test -n "$SRCCACHE"; then
+	mkdir -p "$SRCCACHE"
+	chmod 1777 "$SRCCACHE"
+fi
+
+# poor man's flock
+touch ${SRCCACHE}.lock
+
+trap "rm -f ${SRCCACHE}.lock" EXIT
+
+for m in $MODS ; do
+    eval "fetch_as \$MOD_${m}_local_tarball \$MOD_${m}_url || die \"downloading $m failed\""
+done
+
+if ! test -d ${SRCCACHE}/jack_headers.git.reference; then
+	git clone --mirror git://github.com/jackaudio/headers.git ${SRCCACHE}/jack_headers.git.reference
+fi
+
+if test -z "$OSX" -a ! -d ${SRCCACHE}/ardour.git.reference; then
+	git clone --mirror git://git.ardour.org/ardour/ardour.git ${SRCCACHE}/ardour.git.reference
+fi
+
+trap - EXIT
+
+rm ${SRCCACHE}.lock
+
+if [ x$patch != x ] ; then
+
+    cd $MOD_gtk_unpacked
+    echo "Testing ($unpatch) patches ... "
+
+    if [ x$OSX != x ] ; then
+	# first general patches
+        patches=`ls $this_script_dir/current-gtk-patches/*.patch`
+	# now an ordered list of patches that redesign the GDK/Quartz drawing implementation
+        patches="$patches `ls $this_script_dir/current-gtk-patches/gdk-quartz-drawing/*.patch`"
+    else
+        patches="$this_script_dir/current-gtk-patches/gtkrelocation.patch"
+    fi
+
+    for patch in $patches ; do
+	echo "	testing $p ..."
+        if patch $unpatch --dry-run -p1 < "$patch" ; then
+            :
+        else
+            echo "$? : Patch $patch no longer applies ($unpatch) cleanly."
+            exit 1
+        fi
+    done
+
+    echo "Applying ($unpatch) patches ..."
+    for patch in $patches ; do
+        patch $unpatch -p1 < "$patch"
+    done
+    exit 0
+fi
+
+###################################
+### BUILD STARTS HERE #############
+###################################
+
+# until we've got a new version of tar, we need to specify the compression type, which is a PITA
+tar jxf $MOD_xz_local_tarball && (cd $MOD_xz_unpacked && LDFLAGS="-L$PREFIX/lib" CFLAGS="-I$PREFIX/include $GLOBAL_CFLAGS" ./configure $GLOBAL_CONF && make && make install) || die "xz build failed"
+tar jxf $MOD_tar_local_tarball && (cd $MOD_tar_unpacked && LDFLAGS="-L$PREFIX/lib" CFLAGS="-I$PREFIX/include $GLOBAL_CFLAGS" FORCE_UNSAFE_CONFIGURE=1 ./configure $GLOBAL_CONF && make && make install) || die "tar build failed"
+
+# make sure we pick up the new version of tar that we just installed into $PREFIX
+hash tar
+
+tar xf $MOD_m4_local_tarball && (
+	set -e
+	cd $MOD_m4_unpacked
+	patch -p1 < $this_script_dir/misc-patches/m4-glibc.patch
+	basic_buildonly m4
+) || die "m4 build failed"
+
+tar xf $MOD_make_local_tarball && (
+	set -e
+	cd $MOD_make_unpacked
+	patch -p1 < $this_script_dir/misc-patches/make-alloca.patch
+	basic_buildonly make
+) || die "m4 build failed"
+
+if [ "$OSX_TARGET" == "i386" ]; then
+	tar xf $MOD_zlib_local_tarball && (
+	  cd $MOD_zlib_unpacked \
+	  && CFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1050 -mmacosx-version-min=10.5" LDFLAGS="-headerpad_max_install_names" \
+	    ./configure --archs="-arch i386" ${GLOBAL_PREFIX} \
+	  && make $MAKEFLAGS \
+	  && make install \
+	) || die "zlib build failed"
+elif [ "$OSX_TARGET" == "ppc" ]; then
+	tar xf $MOD_zlib_local_tarball && (
+	  cd $MOD_zlib_unpacked \
+	  && CFLAGS="-DMAC_OS_X_VERSION_MAX_ALLOWED=1050 -mmacosx-version-min=10.5" LDFLAGS="-headerpad_max_install_names" \
+	    ./configure --archs="-arch ppc" ${GLOBAL_PREFIX} \
+	  && make $MAKEFLAGS \
+	  && make install \
+	) || die "zlib build failed"
+else
+	basic_builder zlib
+fi
+
+basic_builder autoconf
+basic_builder automake
+basic_builder libtool
+basic_builder make
+
+ac_cv_header_stdc=yes basic_builder flex
+
+if ! uname -a | grep --silent arwin ; then
+    tar xf $MOD_bison_local_tarball && (
+	set -e
+	cd $MOD_bison_unpacked
+	sed -i.bak 's%defined _IO_ftrylockfile%defined _IO_ftrylockfile || defined _IO_EOF_SEEN%' lib/fseterr.c
+		basic_buildonly bison
+	) || die "bison build failed"
+else
+	# Use system-wide Bison for PPC, OS X <= Leopard and High Sierra
+	# note that -a has precedence over -o for test(1)
+	# Reasons:
+	# 1. OSX 10.5 gcc-4.0 does endless recursions on #include_next <math.h> provided by bison
+	# 2. buildin Bison 3.0 on Mojave aborts (at least on a VM)
+	# 4. system-wide Bison works for these systems
+
+	if test "$OSX_TARGET" != "ppc" -o $OSX_VERSION -gt 9 ; then
+		if test $OSX_VERSION -le 16; then
+			basic_builder bison
+		fi
+	fi
+fi
+
+basic_builder expat
+
+if [ "$OSX_TARGET" == "catalina" -o "$OSX_TARGET" == "bigsur" ]; then
+tar xf $MOD_cmake3_local_tarball && (cd $MOD_cmake3_unpacked && ./bootstrap $GLOBAL_PREFIX; make; make install) || die "cmake build failed"
+else
+tar xf $MOD_cmake_local_tarball && (cd $MOD_cmake_unpacked && ./bootstrap $GLOBAL_PREFIX; make; make install) || die "cmake build failed"
+fi
+
+(
+# libxml2 will fail to build python modules if Python is not a system install, so we need to supply --with-python in that case
+GLOBAL_CONF="$GLOBAL_CONF --libdir=$PREFIX/lib --with-python --with-zlib=$PREFIX" \
+basic_builder libxml2
+) || die
+
+basic_builder libxslt
+
+# hackety-frakkin-hack ....
+# we need to force xsltproc to never rely on network access during this build, so we have to hack up
+# a script to do this
+if test -f $PREFIX/bin/xsltproc; then
+if ! file $PREFIX/bin/xsltproc | grep --silent "POSIX shell script"; then
+        mv $PREFIX/bin/xsltproc $PREFIX/bin/xsltproc.bin
+        cat <<EOF >$PREFIX/bin/xsltproc
+#!/bin/sh
+exec xsltproc.bin --nonet "\$@"
+EOF
+        chmod a+x $PREFIX/bin/xsltproc
+fi
+fi
+# now returning you to some semblance of sanity ...
+
+tar xf $MOD_termcap_local_tarball && (
+	set -e
+	cd $MOD_termcap_unpacked
+	ed tparam.c << EOF
+/STDC_HEADERS
+.+1i
+#include <unistd.h>
+.
+wq
+EOF
+	ac_cv_header_stdc=yes MAKEFLAGS="CFLAGS=-fPIC" basic_buildonly termcap
+) || die "m4 build failed"
+
+
+if [ "$OSX_TARGET" == "catalina" -o "$OSX_TARGET" == "bigsur" ]; then
+	# really Xcode 12
+	ac_cv_sys_tiocgwinsz_in_termios_h=no ac_cv_header_stdc=yes \
+	MAKEFLAGS="SHLIB_LIBS=-ltermcap" \
+	basic_builder readline
+else
+	MAKEFLAGS="SHLIB_LIBS=-ltermcap" \
+	basic_builder readline
+fi
+
+if [ x$explicit_intl != x ] ; then
+    basic_builder libiconv
+    if [ "$OSX_TARGET" == "i386" ]; then
+        (
+        GLOBAL_CONF="$GLOBAL_CONF --with-included-gettext --with-libiconv-prefix=$PREFIX --enable-shared --host=i386 --build=i386" \
+        basic_builder gettext
+        ) || die
+    elif [ "$OSX_TARGET" == "ppc" ]; then
+        (
+        GLOBAL_CONF="$GLOBAL_CONF --with-included-gettext --with-libiconv-prefix=$PREFIX --enable-shared --host=ppc --build=ppc" \
+        basic_builder gettext
+        ) || die
+    else
+        (
+        GLOBAL_CONF="$GLOBAL_CONF --with-included-gettext --with-libiconv-prefix=$PREFIX --enable-shared" \
+        basic_builder gettext
+        ) || die
+    fi
+else
+    basic_builder gettext
+fi
+
+basic_builder intltool
+basic_builder jpeg
+basic_builder libpng
+
+if [ "$OSX_TARGET" == "i386" -o "$OSX_TARGET" == "ppc" ]; then
+	tar xf $MOD_libffi_local_tarball && (
+	  set -e
+	  cd $MOD_libffi_unpacked
+patch -p1 << EOF
+--- a/src/x86/win32.S	2014-11-04 21:56:30.000000000 +0100
++++ b/src/x86/win32.S	2014-11-04 21:57:02.000000000 +0100
+@@ -1142,7 +1142,6 @@
+ 
+ #if defined(X86_WIN32) && !defined(__OS2__)
+ 	.section	.eh_frame,"w"
+-#endif
+ .Lframe1:
+ .LSCIE1:
+ 	.long	.LECIE1-.LASCIE1  /* Length of Common Information Entry */
+@@ -1301,6 +1300,7 @@
+ 	/* End of DW_CFA_xxx CFI instructions.  */
+ 	.align 4
+ .LEFDE5:
++#endif /* defined(X86_WIN32) && !defined(__OS2__), for the eh_frame */
+ 
+ #endif /* !_MSC_VER */
+ 
+EOF
+
+CXXFLAGS="$GLOBAL_CXXFLAGS -I${PREFIX}/include/" \
+	 CPPFLAGS="$GLOBAL_CPPFLAGS -I${PREFIX}/include/" \
+	 CFLAGS="$GLOBAL_CFLAGS -I${PREFIX}/include/" \
+	 LDFLAGS="$GLOBAL_LDFLAGS -L${PREFIX}/lib/" \
+	 ./configure $GLOBAL_CONF \
+	 && make \
+	 && make install \
+	 ) || die libffi build failed
+elif [ "$OSX_TARGET" == "bigsur" -a `uname -m` == "arm64" ]; then
+	GLOBAL_CONF="$GLOBAL_CONF --host=aarch64-apple-darwin" basic_builder libffi
+else
+	basic_builder libffi
+fi
+
+if [ x$OSX != x ] ; then
+        (
+        CFLAGS="$GLOBAL_CFLAGS -DHAVE_APPLE_OPENGL_FRAMEWORK" \
+        basic_builder tiff
+        ) || die
+else
+        basic_builder tiff
+fi
+
+(
+GLOBAL_CONF="$GLOBAL_CONF --with-internal-glib" \
+basic_builder pkgconfig
+) || die
+
+
+if [ "$OSX_TARGET" == "ppc" ]; then
+    # OSX 10.5 compat (no memalign)
+    (
+    set -e
+    tar xf $MOD_glib_local_tarball && cd $MOD_glib_unpacked
+    # see https://mail.gnome.org/archives/commits-list/2014-December/msg03702.html
+    patch -p1 < $this_script_dir/misc-patches/Fix-g_get_monotonic_time-on-non-Intel-Darwin.patch || exit
+    patch -p1 < $this_script_dir/misc-patches/Bug-724590-GSlice-slab_stack-corruption.patch || exit
+    GLOBAL_LDFLAGS="$GLOBAL_LDFLAGS -lintl" \
+    ac_cv_func_posix_memalign=false \
+    glib_cv_compliant_posix_memalign=false \
+    basic_buildonly glib
+    ) || die
+elif [ x$explicit_intl != x ] ; then
+    # still need LDFLAGS in order to find libintl
+    (
+    GLOBAL_LDFLAGS="$GLOBAL_LDFLAGS -lintl" \
+    basic_builder glib
+    ) || die
+else
+	(
+    set -e
+    tar xf $MOD_glib_local_tarball && cd $MOD_glib_unpacked
+    patch -p1 << EOF
+--- a/glib/gdate.c
++++ b/glib/gdate.c
+@@ -2439,6 +2439,8 @@
+  *
+  * Returns: number of characters written to the buffer, or 0 the buffer was too small
+  */
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wformat-nonliteral"
+ gsize     
+ g_date_strftime (gchar       *s, 
+                  gsize        slen, 
+@@ -2549,3 +2551,4 @@
+   return retval;
+ #endif
+ }
++#pragma GCC diagnostic pop
+EOF
+	GLOBAL_CONF="$GLOBAL_CONF --disable-compile-warnings" \
+    basic_buildonly glib
+	) || die
+fi
+
+# Apply a patch until https://bugzilla.gnome.org/show_bug.cgi?id=700268 is fixed (for OS X)
+if uname -a | grep --silent arwin ; then
+    (cd $PREFIX/include/glib-2.0/glib && \
+patch -p0 <<EOFF
+--- gmacros.h~	2013-10-14 13:41:27.000000000 -0400
++++ gmacros.h	2013-10-14 14:07:45.000000000 -0400
+@@ -164,8 +164,12 @@
+ #endif
+
+ #if __has_feature(attribute_analyzer_noreturn)
++/*
+ #define G_ANALYZER_ANALYZING 1
+ #define G_ANALYZER_NORETURN __attribute__((analyzer_noreturn))
++*/
++#define G_ANALYZER_ANALYZING 0
++#define G_ANALYZER_NORETURN
+ #else
+ #define G_ANALYZER_ANALYZING 0
+ #define G_ANALYZER_NORETURN
+EOFF
+) || die
+fi
+
+basic_builder atk
+
+if [ "$OSX_TARGET" == "ppc" ]; then
+    PYEXE=`which python$PYVERS`
+    cat > $PREFIX/bin/python << EOF
+#!/bin/bash
+exec arch -ppc $PYEXE "\$@"
+EOF
+    chmod +x $PREFIX/bin/python
+fi
+
+(
+GLOBAL_CONF="$GLOBAL_CONF --disable-bsdtar --disable-bsdcat --disable-bsdcpio --without-openssl" \
+basic_builder libarchive
+) || die
+
+basic_builder itstool
+(
+MAKEFLAGS= \
+basic_builder gnomecommon
+) || die
+
+tar xf $MOD_gtkosxdocbook_local_tarball && (cd $MOD_gtkosxdocbook_unpacked && JHBUILD_PREFIX=$PREFIX make install) || die "gtkdocbook build failed"
+
+rm -f $PREFIX/bin/python
+
+if [ "$OSX_TARGET" != "ppc" ]; then
+    # only needed for gtk tar ball.
+    # gnome-doc-utils is not parallel-build safe so turn off make -j2, also patch for possible non-standard python location
+    tar xf $MOD_gnomedocutils_local_tarball && \
+      (cd $MOD_gnomedocutils_unpacked && sed -i.bak 's%/usr/bin/python%/usr/bin/env python%' xml2po/xml2po/xml2po.py.in) && \
+      (cd $MOD_gnomedocutils_unpacked && CFLAGS=$GLOBAL_CFLAGS LDFLAGS="$GLOBAL_LDFLAGS" ./configure $GLOBAL_CONF --disable-scrollkeeper && MAKEFLAGS= make && MAKEFLAGS= make install) || die "gnome-doc-utils build failed"
+    
+    (
+    GLOBAL_CONF="$GLOBAL_CONF --disable-scrollkeeper --with-xml-catalog=$PREFIX/etc/xml/catalog" \
+    basic_builder gtkdoc
+    ) || die
+fi
+
+if [ x$OSX = x ] ; then
+    tar xf $MOD_util_linux_local_tarball  && \
+        (set -e && cd $MOD_util_linux_unpacked && ./configure --prefix=$PREFIX --enable-shared --disable-most-builds --without-ncurses --enable-libuuid && cd libuuid && make && make install) || die "uuid build failed"
+else
+	tar xf $MOD_uuid_local_tarball && \
+		(
+			set -e
+			cd $MOD_uuid_unpacked
+			patch Makefile.in << EOF
+115c115
+< 	@\$(LIBTOOL) --mode=link \$(CC) -o \$(LIB_NAME) \$(LIB_OBJS) -rpath \$(libdir) \\
+---
+> 	@\$(LIBTOOL) --mode=link \$(CC) \$(LDFLAGS) -o \$(LIB_NAME) \$(LIB_OBJS) -rpath \$(libdir) \\
+EOF
+			basic_buildonly uuid
+		) || die "uuid build failed"
+fi
+
+if [ "$OSX_TARGET" = "ppc" ]; then
+	tar xf $MOD_pixman_local_tarball && (
+	echo "=== pixman ppc"
+	cd $MOD_pixman_unpacked \
+		&& sed -i.bak 's/vector unsigned int tmp/unsigned int tmp[4]/g' pixman/pixman-vmx.c \
+		&& CFLAGS=$GLOBAL_CFLAGS LDFLAGS="$GLOBAL_LDFLAGS" sh ./configure --prefix=$PREFIX \
+		&& make \
+		&& make install \
+		) || die "pixman build failed"
+else
+	echo "=== pixman"
+	basic_builder pixman
+fi
+
+if [ x$OSX = x ] ; then
+	echo "=== freetype"
+	tar xf $MOD_freetype_local_tarball && \
+		(
+			set -e
+			cd $MOD_freetype_unpacked
+			# see misc-patches/freetype-bytecode.patch (sed delete works for various FT versions)
+			sed -i.bak '/#define TT_CONFIG_OPTION_BYTECODE_INTERPRETER/d' include/freetype/config/ftoption.h
+			sed -i.bak '/#define TT_CONFIG_OPTION_BYTECODE_INTERPRETER/d' ./devel/ftoption.h
+			MAKEFLAGS="-j1" basic_buildonly freetype
+		) || die "freetype build failed"
+else
+    MAKEFLAGS="-j1" basic_builder freetype
+fi
+
+if test "$OSX_TARGET" = "bigsur"; then
+tar xf $MOD_fontconfig_local_tarball && \
+(
+	# ignore error during install (fc-cache fails)
+	cd $MOD_fontconfig_unpacked
+	CXXFLAGS="$GLOBAL_CXXFLAGS -I${PREFIX}/include/" \
+	CPPFLAGS="$GLOBAL_CPPFLAGS -I${PREFIX}/include/" \
+	CFLAGS="$GLOBAL_CFLAGS -I${PREFIX}/include/" \
+	LDFLAGS="$GLOBAL_LDFLAGS -L${PREFIX}/lib/" \
+	    ./configure $GLOBAL_CONF --disable-docs --enable-libxml2 \
+	&& make $MAKEFLAGS \
+	&& make install -i
+)
+else
+(
+GLOBAL_CONF="$GLOBAL_CONF --disable-docs --enable-libxml2" \
+basic_builder fontconfig || true
+) || die
+fi
+
+basic_builder harfbuzz
+
+if [ x$OSX = x ] ; then
+    #
+    # some linux nvidia drivers have buggy support for gradients. this patch
+    # lets the user set an environment variable that will force a Cairo workaround
+    # to the issue.
+    #
+    # --enable-gtk-doc is required so that make dist will work, which we need to be able to run for GPL compliance
+    #
+    cairo_gradient_patch=$this_script_dir/misc-patches/cairo-gradients.patch
+    tar xf $MOD_cairo_local_tarball \
+    && (
+        cd $MOD_cairo_unpacked \
+        && patch -p0 < $cairo_gradient_patch \
+        && CPPFLAGS="$GLOBAL_CPPFLAGS -I${PREFIX}/include" \
+           CFLAGS="$GLOBAL_CFLAGS -I${PREFIX}/include" \
+           LDFLAGS="$GLOBAL_LDFLAGS -L${PREFIX}/lib" \
+           ./configure $GLOBAL_CONF $CAIRO_CONF $GTK_DOC_MODE \
+        && make && make install \
+    ) || die "cairo build failed"
+else
+    cairo_quartz_patch=$this_script_dir/misc-patches/cairo-quartz-surface-ref.patch
+    tar xf $MOD_cairo_local_tarball \
+    && (
+        cd $MOD_cairo_unpacked \
+        && patch -p1 < $cairo_quartz_patch \
+        && CPPFLAGS="$GLOBAL_CPPFLAGS -I${PREFIX}/include" \
+           CFLAGS="$GLOBAL_CFLAGS -I${PREFIX}/include" \
+           LDFLAGS="$GLOBAL_LDFLAGS -L${PREFIX}/lib" \
+           ./configure $GLOBAL_CONF $CAIRO_CONF \
+        && make && make install \
+    ) || die "cairo build failed"
+fi
+
+if [ "$OSX_TARGET" != "ppc" ]; then
+(
+	GLOBAL_CONF="$GLOBAL_CONF $PANGO_CONF --with-included-modules=yes"
+	basic_builder pango
+) || die
+else
+	# CFStringIsSurrogateHighCharacter is 10.6 or later
+	tar xf $MOD_pango_local_tarball && \
+		(
+			set -e
+			cd $MOD_pango_unpacked
+			sed -i.bak 's/CFStringIsSurrogateHighCharacter/UCIsSurrogateHighCharacter/g' pango/pangocoretext-shape.c
+			GLOBAL_CONF="$GLOBAL_CONF $PANGO_CONF --with-included-modules=yes"
+			basic_buildonly pango
+		) || die
+fi
+
+(
+GLOBAL_CONF="$GLOBAL_CONF --with-included-loaders=yes"
+basic_builder gdkpixbuf
+) || die
+
+if [ "$OSX_TARGET" != "ppc" ]; then
+    # only needed for gtk tar ball.
+    # if used w/ ppc python we lack /Users/ppc/gtk/inst/bin/python-config
+
+    if [ x$explicit_intl != x ] ; then
+        # gobject-introspection uses #include <libintl.h> and there's no way to force the "scanner" to look outside the system tree
+        # g-ir-scanner will also go looking for <libintl.h> which means we need to inject -I$PREFIX/include into it
+        # Also on Catalina, dlopen() of relative paths is not allowed (hardedned runtime)
+        tar xf $MOD_gobjectintrospection_local_tarball \
+	&& ( \
+	  cd $MOD_gobjectintrospection_unpacked \
+	  && CFLAGS="$GLOBAL_CFLAGS" ./configure $GLOBAL_CONF CFLAGS="$GLOBAL_CFLAGS" LDFLAGS="$GLOBAL_LDFLAGS -L$PREFIX/lib -lintl" GIR_CFLAGS="-D_POSIX_C_SOURCE" \
+	  && sed -i.bak 's/realpath = extract_libtool.*$/realpath = os.path.abspath(extract_libtool(self.path))/' giscanner/libtoolimporter.py \
+	  && make INTROSPECTION_SCANNER_ARGS="-I$PREFIX/include -D_POSIX_C_SOURCE -DBYTE_ORDER=LITTLE_ENDIAN" CFLAGS="$GLOBAL_CFLAGS" LDFLAGS="$GLOBAL_LDFLAGS" \
+	  && make install \
+	) || die "gobject-introspection build failed"
+    else
+        basic_builder gobjectintrospection
+    fi
+fi
+
+# now gtk itself
+# --enable-gtk-doc is required so that make dist will work, which we need to be able to run for GPL compliance
+tar xf $MOD_gtk_local_tarball && (
+  set -e
+  cd $MOD_gtk_unpacked
+  CXXFLAGS="$GLOBAL_CXXFLAGS" CFLAGS="$GLOBAL_CFLAGS" LDFLAGS="$GLOBAL_LDFLAGS" \
+    ./configure --enable-maintainer-mode --prefix=$PREFIX --libdir=$PREFIX/lib \
+    --disable-cups --disable-papi --disable-introspection --enable-relocation $GTK_DOC_MODE \
+    --with-gdktarget=$GTK_BACKEND
+  ed gtk/gtkclipboard-quartz.c << EOF
+26i
+#include "gdk/quartz/gdkquartz.h"
+.
+wq
+EOF
+	if [ x$OSX != x -a "$OSX_TARGET" != "ppc" ] ; then
+		patch -p1 < $this_script_dir/current-gtk-patches/gdk-draw-combined.diff
+	fi
+  sed -i.bak 's/ demos / /g' Makefile
+  make && make install
+) || die "GTK build failed"
+
+(tar xf $MOD_gtkengines_local_tarball && cd $MOD_gtkengines_unpacked && CFLAGS="$GLOBAL_CFLAGS" LDFLAGS="$GLOBAL_LDFLAGS" ./configure --prefix=$PREFIX/lib --libdir=$PREFIX/lib && make && make install) || die "GTK-engines build failed"
+
+### phew, GTK is done, END OF PART ONE
+
+# use libtool from system: /usr/bin (apple's version support '-static')
+tar xf $MOD_boost_local_tarball && \
+	(
+		set -e
+		cd $MOD_boost_unpacked
+		if test "$OSX_TARGET" != "ppc"; then
+		sed -i.bak 's/4\.0\.0/0.0.0/' tools/build/src/tools/darwin.jam
+		fi
+		if test "$OSX_TARGET" = "bigsur"; then
+		sed -i.bak 's/arch arm/arch arm64/' tools/build/src/tools/darwin.jam
+		fi
+		./bootstrap.sh --prefix=$PREFIX --with-libraries=exception,atomic
+		PATH=/usr/bin:$PATH ./b2 \
+			cflags="$GLOBAL_CFLAGS" cxxflags="$GLOBAL_CXXFLAGS" \
+			variant=release \
+			threading=multi \
+			link=shared \
+			runtime-link=shared \
+			$MAKEFLAGS install
+	) || die "boost build failed"
+
+#BOOST 0.49 issue on GNU/LINUX with new libc
+sed -i.bak 's/TIME_UTC/TIME_UTC_/' $PREFIX/include/boost/thread/xtime.hpp
+
+if test "$OSX_TARGET" == "ppc" -a ${SW_VERS} -lt 6; then
+# OSX/carbon/?? defines "check"
+sed -i.bak '8 i\
+#undef check
+' $PREFIX/include/boost/type_traits/detail/has_binary_operator.hpp
+fi
+
+if [ x$OSX != x -a $OSX_VERSION -ge 14 ] ; then
+	tar xf $MOD_curl_local_tarball \
+		&& (set -e && cd $MOD_curl_unpacked && \
+		GLOBAL_CONF="$GLOBAL_CONF --without-ssl --with-darwinssl" basic_buildonly curl \
+		) || die "curl build failed"
+
+elif [ x$OSX != x ] ; then
+
+	# NSS first
+	tar xf $MOD_nss_local_tarball && \
+	(
+	set -e
+	cd $MOD_nss_unpacked
+	cd nss
+
+	if [ "$OSX_TARGET" == "i386" ]; then
+		NSSCONF="$GLOBAL_CONF"
+		NSSOPT=CPU_ARCH=i386
+		# gcc4.1/2 doesn't support -mpclmul -maes, nor offer intrinsics
+		# skip gcm-x86.c
+		sed -i.bak "s#i386 x386 x86##" lib/freebl/Makefile
+	elif [ "$OSX_TARGET" == "ppc" ]; then
+		NSSCONF="$GLOBAL_CONF"
+		NSSOPT=CPU_ARCH=ppc
+	else
+		NSSCONF="$GLOBAL_CONF -enable-64bit"
+		NSSOPT=USE_64=1
+		# see above
+		sed -i.bak "s# x86 x86_64##" lib/freebl/Makefile
+	fi
+	sed -i.bak "s#XCFLAGS)#XCFLAGS) -std=gnu99#" ./coreconf/command.mk
+	sed -i.bak "s#@executable_path#$PREFIX/lib/#" coreconf/Darwin.mk
+	sed -i.bak "s#@executable_path#$PREFIX/lib/#g" lib/freebl/config.mk
+	sed -i.bak "s#@executable_path#$PREFIX/lib/#" ../nspr/configure
+	sed -i.bak "s#@executable_path#$PREFIX/lib/#" ../nspr/pr/src/linking/prlink.c
+	sed -i.bak '799i \
+strstr(name, "@executable_path") != NULL ||
+' ../nspr/pr/src/linking/prlink.c
+
+	MAKEFLAGS=-j1 XCFLAGS="-I${PREFIX}/include/" \
+		make nss_build_all BUILD_OPT=1 $NSSOPT NSDISTMODE=copy NSS_DISABLE_GTESTS=1 NSPR_CONFIGURE_OPTS="$NSSCONF"
+	chmod -R u+w ../dist/*.OBJ/
+	cp -L ../dist/*.OBJ/lib/*.dylib $PREFIX/lib/
+	cp -L ../dist/*.OBJ/lib/*.a $PREFIX/lib/
+	cp -r ../dist/*.OBJ/include $PREFIX/include/nss3
+	cp -r ../dist/public/nss $PREFIX/include/nss3api
+	cp -r ../dist/private/nss $PREFIX/include/nss3private
+	cat > $PREFIX/lib/pkgconfig/nss.pc << EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+Name: NSS
+Version: 3.25
+Description: Network Security S
+Libs: -L\${libdir} -lssl3 -lsmime3 -lnss3 -lplds4 -lplc4 -lnspr4 -lnssutil3 -lpthread -ldl
+Cflags: -I\${includedir}/nss3 -I\${includedir}/nss3api -I\${includedir}/nss3private
+EOF
+	) || die
+
+	tar xf $MOD_nsspem_local_tarball && \
+	(
+	set -e
+	cd $MOD_nsspem_unpacked
+	sed -i.bak 's/set_target_properties.*$//' src/CMakeLists.txt
+	mkdir build
+	cd build
+	cmake ../src -DCMAKE_C_FLAGS="$GLOBAL_CFLAGS" -DCMAKE_SHARED_LINKER_FLAGS="$GLOBAL_LDFLAGS"
+	make -j1
+	cp libnsspem.dylib $PREFIX/lib
+	) || die
+
+	tar xf $MOD_curl_local_tarball \
+		&& sed -i.bak 's/__powerpc__/__POWERPC__/g' $MOD_curl_unpacked/include/curl/system.h \
+		&& sed -i.bak 's#libnsspem.so#@executable_path/../lib/libnsspem.dylib#' $MOD_curl_unpacked/lib/vtls/nss.c \
+		&& sed -i.bak 's#libnssckbi.so#@executable_path/../lib/libnssckbi.dylib#' $MOD_curl_unpacked/lib/vtls/nss.c \
+		&& (set -e && cd $MOD_curl_unpacked && \
+		GLOBAL_CONF="$GLOBAL_CONF --without-ssl --with-nss" basic_buildonly curl \
+		) || die "curl build failed"
+
+else
+	# NSS first
+	tar xf $MOD_nss_local_tarball && \
+		(
+	if uname -m | grep --silent x86_64 ; then
+		NSS64=USE_64=1
+	else
+		NSS64=
+	fi
+	set -e
+	cd $MOD_nss_unpacked
+	cd nss
+	sed -i.bak "s%DSO_LDOPTS\t\t= %DSO_LDOPTS\t\t= -L$PREFIX/lib/ %" coreconf/Linux.mk
+	MAKEFLAGS=-j1 XCFLAGS="-I${PREFIX}/include/" \
+		make nss_build_all BUILD_OPT=1 $NSS64 NSDISTMODE=copy NSS_ENABLE_WERROR=0
+	cp -L ../dist/*.OBJ/lib/*.so $PREFIX/lib/
+	cp -L ../dist/*.OBJ/lib/*.a $PREFIX/lib/
+	cp -r ../dist/*.OBJ/include $PREFIX/include/nss3
+	cp -r ../dist/public/nss $PREFIX/include/nss3api
+	cp -r ../dist/private/nss $PREFIX/include/nss3private
+	cat > $PREFIX/lib/pkgconfig/nss.pc << EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+Name: NSS
+Version: 3.25
+Description: Network Security S
+Libs: -L\${libdir} -lssl3 -lsmime3 -lnss3 -lplds4 -lplc4 -lnspr4 -lnssutil3 -lpthread -ldl
+Cflags: -I\${includedir}/nss3 -I\${includedir}/nss3api -I\${includedir}/nss3private
+EOF
+	) || die
+	tar xf $MOD_nsspem_local_tarball && \
+	(
+	set -e
+	cd $MOD_nsspem_unpacked
+	mkdir build
+	cd build
+	cmake ../src
+	make -j1
+	cp libnsspem.so $PREFIX/lib
+	) || die
+	(
+	GLOBAL_CONF="$GLOBAL_CONF --without-ssl --with-nss"
+	basic_builder curl
+	) || die
+fi
+
+if test "$OSX_TARGET" == "ppc" -a ${SW_VERS} -lt 6; then
+    tar xf $MOD_fftw_local_tarball && \
+      (set -e && cd $MOD_fftw_unpacked \
+        && patch configure << EOF
+15224c15224
+<         if test "\$host_vendor" = "apple"; then
+---
+>         if test "\$host_vendor" = "appleintel"; then
+EOF
+           CXXFLAGS="$GLOBAL_CXXFLAGS" \
+           CFLAGS="$GLOBAL_CFLAGS" \
+           LDFLAGS="$GLOBAL_LDFLAGS" \
+           ./configure $GLOBAL_CONF --enable-shared --enable-threads \
+        && make && make install \
+        && make clean \
+        && CXXFLAGS="$GLOBAL_CXXFLAGS" \
+           CFLAGS="$GLOBAL_CFLAGS" \
+           LDFLAGS="$GLOBAL_LDFLAGS" \
+           ./configure $GLOBAL_CONF --enable-shared --enable-single --enable-float --enable-threads \
+        && make && make install \
+    ) || die "fftw build failed"
+else
+    tar xf $MOD_fftw_local_tarball && \
+      (set -e && cd $MOD_fftw_unpacked \
+        && CXXFLAGS="$GLOBAL_CXXFLAGS" \
+           CFLAGS="$GLOBAL_CFLAGS" \
+           LDFLAGS="$GLOBAL_LDFLAGS" \
+           ./configure $GLOBAL_CONF --enable-shared --enable-threads \
+        && make && make install \
+        && make clean \
+        && CXXFLAGS="$GLOBAL_CXXFLAGS" \
+           CFLAGS="$GLOBAL_CFLAGS" \
+           LDFLAGS="$GLOBAL_LDFLAGS" \
+           ./configure $GLOBAL_CONF --enable-shared --enable-single --enable-float --enable-threads \
+        && make && make install \
+    ) || die "fftw build failed"
+fi
+
+basic_builder libsigcpp
+
+tar xf $MOD_glibmm_local_tarball && \
+	(
+		set -e
+		cd $MOD_glibmm_unpacked
+		sed -i.bak 's%return gobject_;%return \&gobject_;%' glib/glibmm/threads.h
+		basic_buildonly glibmm
+	) || die "glibmm build failed"
+
+basic_builder cairomm
+basic_builder pangomm
+basic_builder atkmm
+basic_builder gtkmm
+
+(
+GLOBAL_CONF="$GLOBAL_CONF --with-www=none"
+basic_builder raptor2
+) || die
+basic_builder rasqal
+basic_builder libogg
+
+# 'LO_MARKER' patch:  https://sourceforge.net/p/liblo/bugs/39/
+tar xf $MOD_liblo_local_tarball && \
+   (set -e && cd $MOD_liblo_unpacked \
+    && sed -i.bak 's/ -stdlib=libc++//g' configure \
+    && sed -i.bak 's/define LO_MARKER\(.*\)$/define LO_MARKER\1LU/g' lo/lo_macros.h \
+    && CXXFLAGS="$GLOBAL_CXXFLAGS" \
+       CFLAGS="$GLOBAL_CFLAGS" \
+       LDFLAGS="$GLOBAL_LDFLAGS" ./configure $GLOBAL_CONF \
+    && make && make install
+   ) || die "liblo build failed"
+
+# Add --with-virtuoso=no to redland's configure options, to avoid: http://mail-index.netbsd.org/pkgsrc-bugs/2011/05/16/msg042991.html
+(
+GLOBAL_CONF="$GLOBAL_CONF --with-virtuoso=no" \
+MAKEFLAGS="-j1" \
+basic_builder redland
+) || die
+
+# FLAC will not build correctly on OS X Lion with asm optimization enabled, so lets at least force SSE
+if [ x$OSX != x ] ; then
+    if [ "$OSX_TARGET" == "i386" ]; then
+        tar xf $MOD_flac_local_tarball \
+        && (set -e && cd $MOD_flac_unpacked \
+            && CXXFLAGS="$GLOBAL_CXXFLAGS" \
+               CPPFLAGS="$GLOBAL_CPPFLAGS -I${PREFIX}/include/" \
+               CFLAGS="$GLOBAL_CFLAGS" \
+               LDFLAGS="$GLOBAL_LDFLAGS" ./configure $GLOBAL_CONF --disable-cpplibs --disable-asm-optimizations --enable-sse --disable-debug \
+            && sed -i.bak 's/compiler_flags=$/compiler_flags="-arch i386"/' libtool \
+            && make && make install \
+           ) || die "flac build failed"
+    elif [ "$OSX_TARGET" == "ppc" ]; then
+        tar xf $MOD_flac_local_tarball \
+        && (set -e && cd $MOD_flac_unpacked \
+            && CXXFLAGS="$GLOBAL_CXXFLAGS" \
+               CPPFLAGS="$GLOBAL_CPPFLAGS -I${PREFIX}/include/" \
+               CFLAGS="$GLOBAL_CFLAGS" \
+               LDFLAGS="$GLOBAL_LDFLAGS" ./configure $GLOBAL_CONF --disable-cpplibs --disable-asm-optimizations --enable-sse --disable-debug \
+            && sed -i.bak 's/compiler_flags=$/compiler_flags="-arch ppc"/' libtool \
+            && make && make install \
+           ) || die "flac build failed"
+    else
+    (
+         GLOBAL_CONF="$GLOBAL_CONF --disable-cpplibs --disable-asm-optimizations --enable-sse --disable-debug" \
+         basic_builder flac
+    ) || die
+    fi
+else
+    (
+     GLOBAL_CONF="$GLOBAL_CONF --disable-cpplibs --disable-debug" \
+     basic_builder flac
+    ) || die
+fi
+
+basic_builder libvorbis
+
+if [ x$OSX != x ] ; then
+    # sndfile-play incorrectly includes <Carbon.h> which no longer works on Lion
+    tar xf $MOD_libsndfile_local_tarball \
+    && sed -i.bak 's/ examples regtest tests programs//' $MOD_libsndfile_unpacked/Makefile.in \
+    && sed -i.bak 's/12292/24584/' $MOD_libsndfile_unpacked/src/common.h \
+    && sed -i.bak 's/ -Wvla//' $MOD_libsndfile_unpacked/configure \
+    && (set -e && cd $MOD_libsndfile_unpacked \
+        && CFLAGS="$GLOBAL_CFLAGS -I/System/Library/Frameworks/Carbon.framework/Headers" \
+           LDFLAGS="$GLOBAL_LDFLAGS -L$PREFIX/lib -lFLAC -lvorbis -logg" \
+           CXXFLAGS="$GLOBAL_CXXFLAGS" ./configure $GLOBAL_CONF --disable-silent-rules \
+        && make && make install \
+       ) || die "sndfile build failed"
+    sed -i.bak 's/ -lsndfile/ -lsndfile -lvorbis -lvorbisenc -lFLAC -logg/' $PREFIX/lib/pkgconfig/sndfile.pc
+
+    # samplerate incorrectly includes <Carbon.h> which no longer works on Lion
+    tar xf $MOD_libsamplerate_local_tarball \
+    && sed -i.bak 's/ examples tests//' $MOD_libsamplerate_unpacked/Makefile.in \
+    && (set -e && cd $MOD_libsamplerate_unpacked \
+        && CFLAGS="$GLOBAL_CFLAGS -I/System/Library/Frameworks/Carbon.framework/Headers" \
+           LDFLAGS="$GLOBAL_LDFLAGS" \
+           CXXFLAGS="$GLOBAL_CXXFLAGS" ./configure $GLOBAL_CONF \
+        && make && make install
+       ) || die "samplerate build failed"
+else
+    #basic_builder libsndfile
+    tar xf $MOD_libsndfile_local_tarball \
+    && sed -i.bak 's/12292/24584/' $MOD_libsndfile_unpacked/src/common.h \
+    && sed -i.bak 's/ -Wvla//' $MOD_libsndfile_unpacked/configure \
+		&& (set -e && cd $MOD_libsndfile_unpacked  && basic_buildonly sndfile ) || die "sndfile build failed"
+
+    tar xf $MOD_libsamplerate_local_tarball \
+    && sed -i.bak 's/ examples tests//' $MOD_libsamplerate_unpacked/Makefile.in \
+    && (set -e && cd $MOD_libsamplerate_unpacked && basic_buildonly libsamplerate ) || die "SRC build failed"
+fi
+
+tar xf $MOD_aubio_local_tarball &&
+    (set -e && cd $MOD_aubio_unpacked \
+     && sed -i.bak '/no-long-double/d' ./configure \
+     && chmod +x ./configure \
+     && CPPFLAGS="$GLOBAL_CPPFLAGS -I${PREFIX}/include/" \
+        CFLAGS="$GLOBAL_CFLAGS -I$PREFIX" \
+        LDFLAGS="$GLOBAL_LDFLAGS -lm" ./configure $GLOBAL_CONF \
+        ac_cv_path_SWIG=no \
+     && make && MAKEFLAGS=-j1 make install\
+    ) || die "aubio build failed"
+
+# fails to download python dependencies during build since 2016-7-16 on OSX 10.6 (python 2.6.1)
+# says it needs setuptool > version 18 -- we install 6.1 below :)
+# what was this needed for anyway?
+#tar xf $MOD_rdflib_local_tarball && \
+#    (cd $MOD_rdflib_unpacked && unset MACOSX_DEPLOYMENT_TARGET && python ./setup.py build && python ./setup.py install --prefix=$PREFIX) || die "rdflib build failed"
+#tar xf $MOD_setuptools_local_tarball && \
+#    (cd $MOD_setuptools_unpacked && unset MACOSX_DEPLOYMENT_TARGET && python ./setup.py build && python ./setup.py install --prefix=$PREFIX) || die "setuptools build failed"
+#tar xf $MOD_isodate_local_tarball && \
+#    (cd $MOD_isodate_unpacked && unset MACOSX_DEPLOYMENT_TARGET && python ./setup.py build && python ./setup.py install --prefix=$PREFIX) || die "isodate build failed"
+
+tar xf $MOD_LRDF_local_tarball && \
+    (set -e && cd $MOD_LRDF_unpacked \
+     && sed -i.bak 's/glibtoolize/libtoolize/g' autogen.sh \
+     && CFLAGS="$GLOBAL_CFLAGS -I$PREFIX/include" \
+        LDFLAGS="$GLOBAL_LDFLAGS" \
+        sh ./autogen.sh $GLOBAL_CONF \
+     && make && make install \
+    ) || die "LRDF build failed"
+
+basic_builder pcre
+
+if [ x$OSX != x ] ; then
+  MAKEFLAGS= \
+  basic_builder libusb
+else
+(
+  MAKEFLAGS= \
+  GLOBAL_CONF="$GLOBAL_CONF --disable-udev" \
+  basic_builder libusb
+) || die
+fi
+
+(
+unset MACOSX_DEPLOYMENT_TARGET
+tar xf $MOD_lv2_local_tarball && cd $MOD_lv2_unpacked || exit
+waf_buildonly lv2 --no-plugins --no-coverage --copy-headers --lv2dir=$PREFIX/lib/lv2
+) || die
+
+(
+tar xf $MOD_serd_local_tarball && cd $MOD_serd_unpacked || exit
+patch -p1 << EOF
+--- a/src/system.c	2021-01-04 05:26:55.039166377 +0100
++++ b/src/system.c	2021-01-04 05:28:46.543527439 +0100
+@@ -57,7 +57,7 @@
+   return _aligned_malloc(size, alignment);
+ #elif USE_ALIGNED_ALLOC
+   return aligned_alloc(alignment, size);
+-#elif USE_POSIX_MEMALIGN
++#elif defined (USE_POSIX_MEMALIGN) && !defined __ppc__
+   void*     ptr = NULL;
+   const int ret = posix_memalign(&ptr, alignment, size);
+   return ret ? NULL : ptr;
+EOF
+
+if test -n "$OSX" -a $OSX_VERSION -le 14; then
+	# Apple LLVM version 6.1.0 is too old for serd's clang features
+	sed -i.bak 's/__clang__/__crap__/' include/serd/serd.h
+fi
+
+waf_buildonly serd --no-coverage
+) || die
+
+(
+tar xf $MOD_sord_local_tarball && cd $MOD_sord_unpacked || exit
+waf_buildonly sord --no-coverage
+) || die
+
+(
+tar xf $MOD_sratom_local_tarball && cd $MOD_sratom_unpacked || exit
+waf_buildonly sratom --no-coverage
+) || die
+
+(
+tar xf $MOD_lilv_local_tarball && cd $MOD_lilv_unpacked || exit
+if [ x$OSX != x ] ; then
+    waf_buildonly lilv --no-coverage
+else
+    waf_buildonly lilv --default-lv2-path='~/.lv2:/usr/local/lib/lv2:/usr/local/lib64/lv2:/usr/lib/lv2:/usr/lib64/lv2'
+fi
+) || die
+
+(
+tar xf $MOD_suil_local_tarball && cd $MOD_suil_unpacked || exit
+waf_buildonly suil
+) || die
+
+# work around duplicate symbols on OSX with flat namespace. e.g. NI Maschine2 has a "StringPrivate" too.
+(tar xf $MOD_taglib_local_tarball && cd $MOD_taglib_unpacked && sed -i.bak 's/\~ListPrivate/virtual ~ListPrivate/' taglib/toolkit/tlist.tcc && find . -type f -exec sed -i.bak 's/StringPrivate/MyPrivateString/g' {} \; && cmake -DCMAKE_INSTALL_PREFIX=$PREFIX -DCMAKE_RELEASE_TYPE=Release -DCMAKE_C_FLAGS="$GLOBAL_CFLAGS -I${PREFIX}/include/" -DCMAKE_CXX_FLAGS="$GLOBAL_CXXFLAGS -I${PREFIX}/include/" -DCMAKE_LINKER_FLAGS="$GLOBAL_LDFLAGS -L ${PREFIX}/lib/" -DZLIB_ROOT="$PREFIX"  $CMAKE_FLAGS . && make && make install) || die "Building taglib failed"
+
+
+tar xf $MOD_libwebsockets_local_tarball && (
+	set -e
+	cd $MOD_libwebsockets_unpacked
+	sed -i.bak 's%-Werror%%' CMakeLists.txt
+	ed lib/event-libs/glib/glib.c << EOF
+26i
+#ifndef G_SOURCE_FUNC
+#define G_SOURCE_FUNC(f) ((GSourceFunc) (void (*)(void)) (f))
+#endif
+.
+wq
+EOF
+	rm -rf build
+	mkdir build
+	cd build
+	if [ "$OSX_TARGET" == "ppc" ]; then
+		export CC=gcc-4.2
+	fi
+	cmake -DLWS_WITH_SSL=off -DLWS_WITH_GLIB=YES \
+	-DCMAKE_C_FLAGS="$GLOBAL_CFLAGS -isystem $PREFIX/include" -DCMAKE_SHARED_LINKER_FLAGS="$GLOBAL_LDFLAGS"  \
+	-DLWS_WITHOUT_TEST_SERVER=on -DLWS_WITHOUT_TESTAPPS=on \
+	-DCMAKE_INSTALL_PREFIX=$PREFIX -DCMAKE_BUILD_TYPE=Release \
+	..
+	make
+	make install
+) || die "cmake build failed"
+
+
+# VAMP and rubberband do not come with a portable build system, so we provide one using waf
+if ! built vamp ; then
+tar xf $MOD_vamp_local_tarball && (\
+     cd $MOD_vamp_unpacked && \
+     cp $this_script_dir/waf ./waf && \
+     cp $this_script_dir/vamp-wscript ./wscript && \
+     CXXFLAGS="$GLOBAL_CXXFLAGS" CFLAGS="$GLOBAL_CFLAGS" LINKFLAGS="$GLOBAL_LDFLAGS" ./waf configure --prefix=$PREFIX && ./waf build && ./waf install \
+  ) || die vamp build failed
+fi
+
+# Rubberband requires the LADSPA header to be available
+cp $this_script_dir/ladspa.h $PREFIX/include || die "cannot copy ladspa header for rubberband build"
+
+if ! built rubberband ; then
+tar xf $MOD_rubberband_local_tarball && (\
+     cd $MOD_rubberband_unpacked && \
+     cp $this_script_dir/waf ./waf && \
+     cp $this_script_dir/rb-wscript ./wscript && \
+     CXXFLAGS="$GLOBAL_CXXFLAGS" CFLAGS="$GLOBAL_CFLAGS" LINKFLAGS="$GLOBAL_LDFLAGS" ./waf configure --prefix=$PREFIX && ./waf build && ./waf install \
+  ) || die rubberband build failed
+fi
+rm -f $PREFIX/include/ladspa.h
+
+if [ x$OSX != x ] ; then
+basic_builder cppunit
+fi
+
+if [ x$OSX != x ] ; then
+#
+# this is only needed on OS X where some Carbon headers define nil
+#
+cat <<EOFA | patch -d $PREFIX -p1
+--- ../include/sigc++-2.0/sigc++/functors/functor_trait.h~
++++ ../include/sigc++-2.0/sigc++/functors/functor_trait.h
+@@ -4,6 +4,10 @@
+ #define _SIGC_FUNCTORS_FUNCTOR_TRAIT_H_
+ #include <sigc++/type_traits.h>
+ 
++#ifdef nil
++#undef nil
++#endif
++
+ namespace sigc {
+ 
+ /** nil struct type.
+EOFA
+fi
+
+if [ x$OSX != x -o x$weakjack != x ] ; then
+	(
+	  set -e
+		cd $PREFIX
+		git clone \
+			--reference ${SRCCACHE}/jack_headers.git.reference \
+			git://github.com/jackaudio/headers.git \
+			jack_headers
+		cd jack_headers;
+		git reset --hard 23c29914806edefb496af098e937cc09e472bbbe
+		cd $PREFIX
+		rm -rf include/jack/
+		mkdir -p include/jack/
+		cp jack_headers/*.h include/jack
+		rm -rf jack_headers
+		mkdir -p lib/pkgconfig/
+		cat > lib/pkgconfig/jack.pc << EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: jack
+Description: JACK API headers
+Version: 2.0.0
+Libs:
+Cflags: -I\${includedir}
+EOF
+	) || die "failed to deploy jack headers"
+fi
+
+if [ x$explicit_intl != x -a x$OSX != x ] ; then
+	# fix-up circular dependency.
+	install_name_tool -change /usr/lib/libiconv.2.dylib $PREFIX/lib/libiconv.2.dylib $PREFIX/lib/libxslt.1.dylib
+	install_name_tool -change /usr/lib/libiconv.2.dylib $PREFIX/lib/libiconv.2.dylib $PREFIX/lib/libexslt.0.dylib
+	install_name_tool -change /usr/lib/libiconv.2.dylib $PREFIX/lib/libiconv.2.dylib $PREFIX/lib/libxml2.2.dylib
+	install_name_tool -change /usr/lib/libiconv.2.dylib $PREFIX/lib/libiconv.2.dylib $PREFIX/lib/liblrdf.2.dylib
+fi
+
+echo "Success."

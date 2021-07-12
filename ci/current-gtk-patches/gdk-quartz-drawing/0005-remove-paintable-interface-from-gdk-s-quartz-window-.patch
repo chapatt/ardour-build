@@ -1,0 +1,225 @@
+From dcfc4201d311dc8504789a63cad85e53a82b7da8 Mon Sep 17 00:00:00 2001
+From: Paul Davis <paul@linuxaudiosystems.com>
+Date: Wed, 10 Mar 2021 22:47:31 -0700
+Subject: [PATCH 5/8] remove paintable interface from gdk's quartz window,
+ since it is no longer used.
+
+We do not use a backing store, we are not double buffered, and so the entire begin/end paint region concept is
+no longer relevant
+---
+ gdk/quartz/gdkwindow-quartz.c | 180 ++++++++--------------------------
+ 1 file changed, 40 insertions(+), 140 deletions(-)
+
+diff --git a/gdk/quartz/gdkwindow-quartz.c b/gdk/quartz/gdkwindow-quartz.c
+index 620f46a..d6b6f7f 100644
+--- a/gdk/quartz/gdkwindow-quartz.c
++++ b/gdk/quartz/gdkwindow-quartz.c
+@@ -216,140 +216,49 @@ gdk_window_impl_quartz_init (GdkWindowImplQuartz *impl)
+ }
+ 
+ static void
+-gdk_window_impl_quartz_begin_paint_region (GdkPaintable    *paintable,
+-                                           GdkWindow       *window,
+-					   const GdkRegion *region)
+-{
+-  GdkWindowImplQuartz *impl = GDK_WINDOW_IMPL_QUARTZ (paintable);
+-  GdkWindowObject *private = (GdkWindowObject*)window;
+-  int n_rects;
+-  GdkRectangle *rects = NULL;
+-  GdkPixmap *bg_pixmap;
+-  GdkRegion *clipped_and_offset_region;
+-  gboolean free_clipped_and_offset_region = TRUE;
+-
+-  bg_pixmap = private->bg_pixmap;
+-
+-  clipped_and_offset_region = gdk_region_copy (region);
+-
+-  gdk_region_intersect (clipped_and_offset_region,
+-                        private->clip_region_with_children);
+-  gdk_region_offset (clipped_and_offset_region,
+-                     private->abs_x, private->abs_y);
+-
+-  if (impl->begin_paint_count == 0)
+-    {
+-      impl->paint_clip_region = clipped_and_offset_region;
+-      free_clipped_and_offset_region = FALSE;
+-    }
+-  else
+-    gdk_region_union (impl->paint_clip_region, clipped_and_offset_region);
+-
+-  impl->begin_paint_count++;
+-
+-  if (bg_pixmap == GDK_NO_BG)
+-    goto done;
+-
+-  gdk_region_get_rectangles (clipped_and_offset_region, &rects, &n_rects);
+-
+-  if (n_rects == 0)
+-    goto done;
+-
+-  if (bg_pixmap == NULL)
+-    {
+-      CGContextRef cg_context;
+-      CGColorRef color;
+-      gint i;
+-
+-      cg_context = gdk_quartz_drawable_get_context (GDK_DRAWABLE (impl), FALSE);
+-      color = _gdk_quartz_colormap_get_cgcolor_from_pixel (window,
+-                                                           private->bg_color.pixel);
+-      CGContextSetFillColorWithColor (cg_context, color);
+-      CGColorRelease (color);
+- 
+-      for (i = 0; i < n_rects; i++)
+-        {
+-          CGContextFillRect (cg_context,
+-                             CGRectMake (rects[i].x, rects[i].y,
+-                                         rects[i].width, rects[i].height));
+-        }
+-
+-      gdk_quartz_drawable_release_context (GDK_DRAWABLE (impl), cg_context);
+-    }
+-  else
+-    {
+-      int x, y;
+-      int x_offset, y_offset;
+-      int width, height;
+-      GdkGC *gc;
+-
+-      x_offset = y_offset = 0;
+-
+-      while (window && bg_pixmap == GDK_PARENT_RELATIVE_BG)
+-        {
+-          /* If this window should have the same background as the parent,
+-           * fetch the parent. (And if the same goes for the parent, fetch
+-           * the grandparent, etc.)
+-           */
+-          x_offset += ((GdkWindowObject *) window)->x;
+-          y_offset += ((GdkWindowObject *) window)->y;
+-          window = GDK_WINDOW (((GdkWindowObject *) window)->parent);
+-          bg_pixmap = ((GdkWindowObject *) window)->bg_pixmap;
+-        }
+-
+-      if (bg_pixmap == NULL || bg_pixmap == GDK_NO_BG || bg_pixmap == GDK_PARENT_RELATIVE_BG)
+-        {
+-          /* Parent relative background but the parent doesn't have a
+-           * pixmap.
+-           */ 
+-          goto done;
+-        }
+-
+-      /* Note: There should be a CG API to draw tiled images, we might
+-       * want to look into that for this. 
+-       */
+-      gc = gdk_gc_new (GDK_DRAWABLE (impl));
+-
+-      gdk_drawable_get_size (GDK_DRAWABLE (bg_pixmap), &width, &height);
+-
+-      x = -x_offset;
+-      while (x < (rects[0].x + rects[0].width))
+-        {
+-          if (x + width >= rects[0].x)
+-	    {
+-              y = -y_offset;
+-              while (y < (rects[0].y + rects[0].height))
+-                {
+-                  if (y + height >= rects[0].y)
+-                    gdk_draw_drawable (GDK_DRAWABLE (impl), gc, bg_pixmap, 0, 0, x, y, width, height);
+-		  
+-                  y += height;
+-                }
+-            }
+-          x += width;
+-        }
++_gdk_window_quartz_clear_region (GdkWindow *window, const GdkRegion* region, bool ignored)
++{
++  if (gdk_drawable_get_colormap (window) != gdk_screen_get_rgba_colormap (_gdk_screen)) {
++
++	  /* Window is opaque. We no longer use backing store on Quartz, so the code that fill the backing store with the background
++	   * color is no longer in use. We do that here, if there is a background color.
++	   */
++
++	  GdkWindowObject *private = GDK_WINDOW_OBJECT(window);
++	  GdkWindowImplQuartz *impl = GDK_WINDOW_IMPL_QUARTZ (private->impl);
++
++	  GdkColor bg_color = private->bg_color;
++	  CGContextRef cg_context = [[NSGraphicsContext currentContext] graphicsPort];
++	  CGContextSaveGState (cg_context);
++
++	  if (g_getenv ("GDK_HARLEQUIN_DEBUGGING")) {
++		  CGContextSetRGBFillColor (cg_context,
++		                            (random() % 65535) / 65335.0,
++		                            (random() % 65535) / 65335.0,
++		                            (random() % 65535) / 65335.0,
++		                            1.0);
++	  } else {
++		  CGContextSetRGBFillColor (cg_context,
++		                            bg_color.red / 65335.0,
++		                            bg_color.green / 65335.0,
++		                            bg_color.blue / 65335.0,
++		                            1.0);
++	  }
+ 
+-      g_object_unref (gc);
+-    }
++	  GdkRectangle *rects;
++	  gint n_rects, i;
+ 
+- done:
+-  if (free_clipped_and_offset_region)
+-    gdk_region_destroy (clipped_and_offset_region);
+-  g_free (rects);
+-}
++	  gdk_region_get_rectangles (region, &rects, &n_rects);
+ 
+-static void
+-gdk_window_impl_quartz_end_paint (GdkPaintable *paintable)
+-{
+-  GdkWindowImplQuartz *impl = GDK_WINDOW_IMPL_QUARTZ (paintable);
++	  for (i = 0; i < n_rects; i++)
++	  {
++		  CGRect cg_rect = CGRectMake (rects[i].x + 0.5, rects[i].y + 0.5, rects[i].width, rects[i].height);
+ 
+-  impl->begin_paint_count--;
++		  CGContextFillRect (cg_context, cg_rect);
++	  }
+ 
+-  if (impl->begin_paint_count == 0)
+-    {
+-      gdk_region_destroy (impl->paint_clip_region);
+-      impl->paint_clip_region = NULL;
+-    }
++	  CGContextRestoreGState (cg_context);
++  }
+ }
+ 
+ void
+@@ -510,14 +419,7 @@ _gdk_window_impl_quartz_get_type (void)
+ 	  (GInstanceInitFunc) gdk_window_impl_quartz_init,
+ 	};
+ 
+-      const GInterfaceInfo paintable_info = 
+-	{
+-	  (GInterfaceInitFunc) gdk_window_impl_quartz_paintable_init,
+-	  NULL,
+-	  NULL
+-	};
+-
+-      const GInterfaceInfo window_impl_info = 
++      const GInterfaceInfo window_impl_info =
+ 	{
+ 	  (GInterfaceInitFunc) gdk_window_impl_iface_init,
+ 	  NULL,
+@@ -527,9 +429,7 @@ _gdk_window_impl_quartz_get_type (void)
+       object_type = g_type_register_static (GDK_TYPE_DRAWABLE_IMPL_QUARTZ,
+                                             "GdkWindowImplQuartz",
+                                             &object_info, 0);
+-      g_type_add_interface_static (object_type,
+-				   GDK_TYPE_PAINTABLE,
+-				   &paintable_info);
++
+       g_type_add_interface_static (object_type,
+ 				   GDK_TYPE_WINDOW_IMPL,
+ 				   &window_impl_info);
+-- 
+2.20.1 (Apple Git-117)
+

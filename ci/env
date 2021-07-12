@@ -1,0 +1,5 @@
+# ~/.profile for build-stack (GNU/Linux and OSX)
+export PATH=/usr/lib/ccache:$HOME/bin:$HOME/gtk/inst/bin/:$PATH
+export PKG_CONFIG_PATH=$HOME/gtk/inst/lib/pkgconfig/:/usr/lib/i386-linux-gnu/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig/
+export PYTHONPATH=./:$HOME/gtk/inst/lib/python`python --version 2>&1 | cut -d ' ' -f 2 | cut -b 1-3`/site-packages/
+export LD_LIBRARY_PATH=$HOME/gtk/inst/lib/

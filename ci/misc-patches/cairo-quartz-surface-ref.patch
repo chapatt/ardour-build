@@ -1,0 +1,21 @@
+diff --git a/src/cairo-quartz-surface.c b/src/cairo-quartz-surface.c
+index 1116ff9..6623ae8 100644
+--- a/src/cairo-quartz-surface.c
++++ b/src/cairo-quartz-surface.c
+@@ -776,6 +776,7 @@ DataProviderReleaseCallback (void *info, const void *data, size_t size)
+ {
+     quartz_source_image_t *source_img = info;
+     _cairo_surface_release_source_image (source_img->surface, source_img->image_out, source_img->image_extra);
++    cairo_surface_destroy (source_img->surface);
+     free (source_img);
+ }
+ 
+@@ -815,7 +816,7 @@ _cairo_surface_to_cgimage (cairo_surface_t       *source,
+     if (unlikely (source_img == NULL))
+ 	return _cairo_error (CAIRO_STATUS_NO_MEMORY);
+ 
+-    source_img->surface = source;
++    source_img->surface = cairo_surface_reference (source);
+ 
+     if (source->type == CAIRO_SURFACE_TYPE_RECORDING) {
+ 	image_surface = (cairo_image_surface_t *)

@@ -1,0 +1,24 @@
+From bbb7033cf8c1421ee9f8286abe0066c73b8aa332 Mon Sep 17 00:00:00 2001
+From: Paul Davis <paul@linuxaudiosystems.com>
+Date: Wed, 10 Mar 2021 22:43:15 -0700
+Subject: [PATCH 3/8] provide helpful explanatory comment
+
+---
+ gdk/quartz/GdkQuartzView.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/gdk/quartz/GdkQuartzView.c b/gdk/quartz/GdkQuartzView.c
+index 6b8d6d0..8da253f 100644
+--- a/gdk/quartz/GdkQuartzView.c
++++ b/gdk/quartz/GdkQuartzView.c
+@@ -657,6 +657,7 @@
+     }
+ 
+   impl->in_paint_rect_count++;
++  /* this essentially generates an expose event */
+   _gdk_window_process_updates_recurse (gdk_window, region);
+   impl->in_paint_rect_count--;
+ 
+-- 
+2.20.1 (Apple Git-117)
+

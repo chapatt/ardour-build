@@ -1,0 +1,42 @@
+--- gtk+/gdk/quartz/gdkwindow-quartz.c~	2013-10-16 11:31:40.000000000 -0400
++++ gtk+/gdk/quartz/gdkwindow-quartz.c	2016-06-28 17:17:39.000000000 -0400
+@@ -3010,7 +3010,14 @@
+       clear_toplevel_order ();
+     }
+ 
+-  SetSystemUIMode (kUIModeAllHidden, kUIOptionAutoShowMenuBar);
++  if ([NSWindow respondsToSelector:@selector(toggleFullScreen:)])
++    {
++       [impl->toplevel toggleFullScreen:nil];
++    }
++  else
++    {
++      SetSystemUIMode (kUIModeAllHidden, kUIOptionAutoShowMenuBar);
++    }
+ 
+   gdk_synthesize_window_state (window, 0, GDK_WINDOW_STATE_FULLSCREEN);
+ }
+@@ -3029,14 +3036,21 @@
+   geometry = get_fullscreen_geometry (window);
+   if (geometry)
+     {
+-      SetSystemUIMode (kUIModeNormal, 0);
++      if ([NSWindow respondsToSelector:@selector(toggleFullScreen:)])
++        {
++          [impl->toplevel toggleFullScreen:nil];
++        }
++      else
++        {
++	  SetSystemUIMode (kUIModeNormal, 0);
++	}
+ 
+       move_resize_window_internal (window,
+                                    geometry->x,
+                                    geometry->y,
+                                    geometry->width,
+                                    geometry->height);
+-      
++
+       gdk_window_set_decorations (window, geometry->decor);
+ 
+       g_object_set_data (G_OBJECT (window), FULLSCREEN_DATA, NULL);
