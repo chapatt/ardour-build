@@ -31,19 +31,28 @@ jobs:
           #   }
     steps:
       
-      - name: Using curl with openssl
-        shell: bash
-        run: |
-          brew rm curl
-          brew update
-          brew install curl-openssl
+      # - name: Download CA Certification
+      #   # https://stackoverflow.com/a/54503009
+      #   shell: bash
+      #   run: |
+      #     brew info openssl
+
+      #     echo "Downloading cacert.pem..."
+      #     curl -sSL http://curl.haxx.se/ca/cacert.pem >> cacert.pem
+
+      #     mv -v cacert.pem /usr/local/etc/openssl@1.1/certs
+
+      # - name: Set Env
+      #   shell: bash
+      #   run: |
+      #     echo "CURL_CA_BUNDLE=/usr/local/etc/openssl/certs" >> $GITHUB_ENV
 
       - name: Checkout Build Tools
         uses: actions/checkout@v2
         with:
           repository: ${{ github.repository }}
           fetch-depth: 0
-          ref: linux
+          ref: macos
           path: '.'
 
       - name: Get Ardour Latest Release Source Code
@@ -110,6 +119,6 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v2
         with:
-          name: Ardour-Linux-Artifact
+          name: Ardour-MacOS-Artifact
           path: |
             ${{ github.workspace }}/src/tools/osx_packaging/Ardour-*.dmg
