@@ -1,0 +1,91 @@
+From cf3c5db07b429c68a531c32a60d6f89ebc066a06 Mon Sep 17 00:00:00 2001
+From: Paul Davis <paul@linuxaudiosystems.com>
+Date: Wed, 10 Mar 2021 22:45:14 -0700
+Subject: [PATCH 4/8] remove GdkDrawable flush function for quartz, since this
+ is no longer relevant
+
+All drawing takes place inside NSView:drawRect callbacks from the main cocoa/quartz run loop
+---
+ gdk/quartz/gdkdrawable-quartz.c | 46 ---------------------------------
+ gdk/quartz/gdkprivate-quartz.h  |  1 -
+ 2 files changed, 47 deletions(-)
+
+diff --git a/gdk/quartz/gdkdrawable-quartz.c b/gdk/quartz/gdkdrawable-quartz.c
+index 503ea83..7a432dd 100644
+--- a/gdk/quartz/gdkdrawable-quartz.c
++++ b/gdk/quartz/gdkdrawable-quartz.c
+@@ -835,51 +835,6 @@ gdk_quartz_drawable_get_context (GdkDrawable *drawable,
+   return GDK_DRAWABLE_IMPL_QUARTZ_GET_CLASS (drawable)->get_context (drawable, antialias);
+ }
+ 
+-/* Help preventing "beam sync penalty" where CG makes all graphics code
+- * block until the next vsync if we try to flush (including call display on
+- * a view) too often. We do this by limiting the manual flushing done
+- * outside of expose calls to less than some frequency when measured over
+- * the last 4 flushes. This is a bit arbitray, but seems to make it possible
+- * for some quick manual flushes (such as gtkruler or gimp's marching ants)
+- * without hitting the max flush frequency.
+- *
+- * If drawable NULL, no flushing is done, only registering that a flush was
+- * done externally.
+- */
+-void
+-_gdk_quartz_drawable_flush (GdkDrawable *drawable)
+-{
+-  static struct timeval prev_tv;
+-  static gint intervals[4];
+-  static gint index;
+-  struct timeval tv;
+-  gint ms;
+-
+-  gettimeofday (&tv, NULL);
+-  ms = (tv.tv_sec - prev_tv.tv_sec) * 1000 + (tv.tv_usec - prev_tv.tv_usec) / 1000;
+-  intervals[index++ % 4] = ms;
+-
+-  if (drawable)
+-    {
+-      ms = intervals[0] + intervals[1] + intervals[2] + intervals[3];
+-
+-      /* ~25Hz on average. */
+-      if (ms > 4*40)
+-        {
+-          if (GDK_IS_WINDOW_IMPL_QUARTZ (drawable))
+-            {
+-              GdkWindowImplQuartz *window_impl = GDK_WINDOW_IMPL_QUARTZ (drawable);
+-
+-              [window_impl->toplevel flushWindow];
+-            }
+-
+-          prev_tv = tv;
+-        }
+-    }
+-  else
+-    prev_tv = tv;
+-}
+-
+ void
+ gdk_quartz_drawable_release_context (GdkDrawable  *drawable, 
+ 				     CGContextRef  cg_context)
+@@ -894,7 +849,6 @@ gdk_quartz_drawable_release_context (GdkDrawable  *drawable,
+       /* See comment in gdk_quartz_drawable_get_context(). */
+       if (window_impl->in_paint_rect_count == 0)
+         {
+-          _gdk_quartz_drawable_flush (drawable);
+           [window_impl->view unlockFocus];
+         }
+     }
+diff --git a/gdk/quartz/gdkprivate-quartz.h b/gdk/quartz/gdkprivate-quartz.h
+index b78c353..8c09fcb 100644
+--- a/gdk/quartz/gdkprivate-quartz.h
++++ b/gdk/quartz/gdkprivate-quartz.h
+@@ -202,7 +202,6 @@ void         _gdk_quartz_synthesize_null_key_event (GdkWindow *window);
+ 
+ /* Drawable */
+ void        _gdk_quartz_drawable_finish (GdkDrawable *drawable);
+-void        _gdk_quartz_drawable_flush  (GdkDrawable *drawable);
+ 
+ /* Geometry */
+ void        _gdk_quartz_window_scroll      (GdkWindow       *window,
+-- 
+2.20.1 (Apple Git-117)
+

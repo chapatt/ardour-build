@@ -1,0 +1,120 @@
+From 9f3ddcda60c09e4b263a7947191552616aa205ec Mon Sep 17 00:00:00 2001
+From: Paul Davis <paul@linuxaudiosystems.com>
+Date: Wed, 10 Mar 2021 22:48:43 -0700
+Subject: [PATCH 6/8] remove code used to manage (rate-limit) window flushes
+ under quartz
+
+Not relevant any more, since all drawing is done from the cocoa/quartz event loop, in coordination
+with the quartz compositor and cocoa/quartz own rate limiting
+---
+ gdk/quartz/gdkwindow-quartz.c | 73 -----------------------------------
+ 1 file changed, 73 deletions(-)
+
+diff --git a/gdk/quartz/gdkwindow-quartz.c b/gdk/quartz/gdkwindow-quartz.c
+index d6b6f7f..17812e7 100644
+--- a/gdk/quartz/gdkwindow-quartz.c
++++ b/gdk/quartz/gdkwindow-quartz.c
+@@ -30,9 +30,6 @@
+ 
+ static gpointer parent_class;
+ 
+-static GSList   *update_nswindows;
+-static gboolean  in_process_all_updates = FALSE;
+-
+ static GSList *main_window_stack;
+ 
+ #define FULLSCREEN_DATA "fullscreen-data"
+@@ -313,90 +310,20 @@ void
+ _gdk_windowing_window_process_updates_recurse (GdkWindow *window,
+                                                GdkRegion *region)
+ {
+-  /* Make sure to only flush each toplevel at most once if we're called
+-   * from process_all_updates.
+-   */
+-  if (in_process_all_updates)
+-    {
+-      GdkWindow *toplevel;
+-
+-      toplevel = gdk_window_get_effective_toplevel (window);
+-      if (toplevel && WINDOW_IS_TOPLEVEL (toplevel))
+-        {
+-          GdkWindowObject *toplevel_private;
+-          GdkWindowImplQuartz *toplevel_impl;
+-          NSWindow *nswindow;
+-
+-          toplevel_private = (GdkWindowObject *)toplevel;
+-          toplevel_impl = (GdkWindowImplQuartz *)toplevel_private->impl;
+-          nswindow = toplevel_impl->toplevel;
+-
+-          /* In theory, we could skip the flush disabling, since we only
+-           * have one NSView.
+-           */
+-          if (nswindow && ![nswindow isFlushWindowDisabled]) 
+-            {
+-              [nswindow retain];
+-              [nswindow disableFlushWindow];
+-              update_nswindows = g_slist_prepend (update_nswindows, nswindow);
+-            }
+-        }
+-    }
+-
+   if (WINDOW_IS_TOPLEVEL (window))
+     _gdk_quartz_window_set_needs_display_in_region (window, region);
+   else
+     _gdk_window_process_updates_recurse (window, region);
+-
+-  /* NOTE: I'm not sure if we should displayIfNeeded here. It slows down a
+-   * lot (since it triggers the beam syncing) and things seem to work
+-   * without it.
+-   */
+ }
+ 
+ void
+ _gdk_windowing_before_process_all_updates (void)
+ {
+-  in_process_all_updates = TRUE;
+-
+-  NSDisableScreenUpdates ();
+ }
+ 
+ void
+ _gdk_windowing_after_process_all_updates (void)
+ {
+-  GSList *old_update_nswindows = update_nswindows;
+-  GSList *tmp_list = update_nswindows;
+-
+-  update_nswindows = NULL;
+-
+-  while (tmp_list)
+-    {
+-      NSWindow *nswindow = tmp_list->data;
+-
+-      [[nswindow contentView] displayIfNeeded];
+-
+-      _gdk_quartz_drawable_flush (NULL);
+-
+-      [nswindow enableFlushWindow];
+-      [nswindow flushWindow];
+-      [nswindow release];
+-
+-      tmp_list = tmp_list->next;
+-    }
+-
+-  g_slist_free (old_update_nswindows);
+-
+-  in_process_all_updates = FALSE;
+-
+-  NSEnableScreenUpdates ();
+-}
+-
+-static void
+-gdk_window_impl_quartz_paintable_init (GdkPaintableIface *iface)
+-{
+-  iface->begin_paint_region = gdk_window_impl_quartz_begin_paint_region;
+-  iface->end_paint = gdk_window_impl_quartz_end_paint;
+ }
+ 
+ GType
+-- 
+2.20.1 (Apple Git-117)
+

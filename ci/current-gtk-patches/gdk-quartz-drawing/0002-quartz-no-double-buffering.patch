@@ -1,0 +1,30 @@
+From c51867a6707a354637a0f8fc731be5d71a88d7e6 Mon Sep 17 00:00:00 2001
+From: Paul Davis <paul@linuxaudiosystems.com>
+Date: Tue, 9 Mar 2021 09:58:07 -0700
+Subject: [PATCH 2/8] quartz: no double buffering
+
+All of our drawing on quartz is (a) buffered via the NSWindow (b) via the quartz
+compositor, so this whole concept is redundant here.
+---
+ gtk/gtkwidget.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/gtk/gtkwidget.c b/gtk/gtkwidget.c
+index 1d1f6bb..9f0d89d 100644
+--- a/gtk/gtkwidget.c
++++ b/gtk/gtkwidget.c
+@@ -6234,7 +6234,11 @@ gtk_widget_set_double_buffered (GtkWidget *widget,
+ {
+   g_return_if_fail (GTK_IS_WIDGET (widget));
+ 
++#ifdef __APPLE__
++  double_buffered = FALSE;
++#else
+   double_buffered = (double_buffered != FALSE);
++#endif
+ 
+   if (double_buffered != gtk_widget_get_double_buffered (widget))
+     {
+-- 
+2.20.1 (Apple Git-117)
+

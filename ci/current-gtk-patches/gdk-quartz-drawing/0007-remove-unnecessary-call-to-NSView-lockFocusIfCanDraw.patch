@@ -1,0 +1,30 @@
+From f25c068b28cdc067938bfced9ff44e8d45eb619f Mon Sep 17 00:00:00 2001
+From: Paul Davis <paul@linuxaudiosystems.com>
+Date: Wed, 10 Mar 2021 22:49:59 -0700
+Subject: [PATCH 7/8] remove unnecessary call to NSView:lockFocusIfCanDraw
+ which is also deprecated
+
+All drawing is done from a context where this is no longer necessary (i.e. single-thread drawing, always from
+the main cocoa/quartz event loop)
+---
+ gdk/quartz/gdkwindow-quartz.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gdk/quartz/gdkwindow-quartz.c b/gdk/quartz/gdkwindow-quartz.c
+index 17812e7..444e6ec 100644
+--- a/gdk/quartz/gdkwindow-quartz.c
++++ b/gdk/quartz/gdkwindow-quartz.c
+@@ -95,8 +95,8 @@ gdk_window_impl_quartz_get_context (GdkDrawable *drawable,
+    */
+   if (window_impl->in_paint_rect_count == 0)
+     {
+-      if (![window_impl->view lockFocusIfCanDraw])
+-        return NULL;
++	    // if (![window_impl->view lockFocusIfCanDraw])
++	    // return NULL;
+     }
+ 
+   cg_context = [[NSGraphicsContext currentContext] graphicsPort];
+-- 
+2.20.1 (Apple Git-117)
+

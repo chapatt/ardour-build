@@ -26,9 +26,70 @@ env:
 
 jobs:
   ardour-build:
-    name: Ardour Build for Linux 64bit
+    name: Ardour Build for Linux ${{ matrix.config.arch }}
     runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {
+              arch: x86_64,
+              image_repo: debian,
+              image_tag: buster
+            }
+          # - {
+          #     arch: arm64,
+          #     image_repo: debian,
+          #     image_tag: buster
+          #   }
+    container:
+      image: ${{ matrix.config.image_repo }}:${{ matrix.config.image_tag }}
+      options: -v ${{ github.workspace }}:/home/ardour:rw
     steps:
+
+      - name: Install the Basic Dependencies
+        shell: bash
+        run: |
+          apt-get -y -qq update && apt-get -y --no-install-recommends install \
+            apt-transport-https \
+            python3 \
+            python3-pip \
+            git \
+            ca-certificates \
+            rsync \
+            unzip \
+            itstool \
+            build-essential \
+            ccache \
+            wget \
+            python \
+            python-dev \
+            libxml-parser-perl \
+            file \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxext-dev \
+            libxrender-dev \
+            ocaml-nox \
+            gperf \
+            libxcb-render0-dev \
+            libxcb1-dev \
+            libxcb-shm0-dev \
+            libpulse-dev \
+            libasound-dev \
+            libjack-dev \
+            ladspa-sdk \
+            makeself \
+            chrpath \
+            mawk
+
+      - name: Checkout Build Tools
+        uses: actions/checkout@v2
+        with:
+          repository: ${{ github.repository }}
+          fetch-depth: 0
+          ref: linux
+          path: '.'
 
       - name: Get Ardour Latest Release Source Code
         uses: actions/checkout@v2
@@ -37,69 +98,6 @@ jobs:
           fetch-depth: 1
           ref: ${{ env.ARDOUR_VERSION }}
           path: './src'
-
-      # https://linuxgamecast.com/2020/06/interfacing-linux-compiling-ardour-6-on-debian/
-      - name: Install the Dependencies
-        shell: bash
-        run: |
-          sudo apt-get -y -qq update && sudo apt-get -y --no-install-recommends install \
-            python3 \
-            python3-pip \
-            build-essential \
-            git \
-            libboost-all-dev \
-            gcc \
-            g++ \
-            pkg-config \
-            libasound2-dev \
-            libgtk2.0-dev \
-            glibmm-2.4-dev \
-            libsndfile1-dev \
-            libcurl4-nss-dev \
-            libarchive-dev \
-            liblo-dev \
-            libtag1-dev \
-            vamp-plugin-sdk \
-            librubberband-dev \
-            libfftw3-dev \
-            libaubio-dev \
-            libxml2-dev \
-            libsamplerate-dev \
-            lv2-dev \
-            libserd-dev \
-            libsord-dev \
-            libsratom-dev \
-            liblilv-dev \
-            libgtkmm-2.4-dev \
-            libjack-jackd2-dev \
-            libogg-dev \
-            libcppunit-dev \
-            libudev-dev \
-            libwebsockets-dev \
-            libusb-dev \
-            libsuil-dev \
-            libdbus-1-dev \
-            xjadeo \
-            libusb-1.0-0-dev \
-            libreadline-dev \
-            libarchive-dev \
-            liblo-dev \
-            libtag1-dev \
-            libvamp-sdk2v5 \
-            librubberband-dev \
-            libaubio-dev \
-            libpangomm-1.4-dev \
-            libserd-dev \
-            libsord-dev \
-            libsratom-dev \
-            liblilv-dev \
-            libgtkmm-2.4-dev \
-            libsuil-dev \
-            libcppunit-dev \
-            libpulse-dev
-
-          sudo apt -y install liblrdf0-dev
-          sudo apt -y install libnss3 nss-plugin-pem
         
       - name: Print GCC/G++ Version
         shell: bash
@@ -107,29 +105,58 @@ jobs:
           gcc --version
           g++ --version
 
-      - name: Compile
+      - name: Prepare
         shell: bash
         run: |
-          cd ${{ github.workspace }}/src
-          ./waf configure --strict --prefix=/usr --configdir=/etc --libjack=weak --ptformat --with-backends=jack,alsa,pulseaudio,dummy --optimize --cxx11
-          ./waf -j$(nproc)
+          chmod a+x /home/ardour/ci/waf
+          chmod a+x /home/ardour/ci/rb-wscript
+          chmod a+x /home/ardour/ci/vamp-wscript
+
+      - name: Set env
+        shell: bash
+        run: |
+          echo "HOME=/home/ardour/linux-${{ matrix.config.arch }}" >> $GITHUB_ENV
+          echo "PATH=/usr/lib/ccache:/home/ardour/linux-${{ matrix.config.arch }}/bin:/home/ardour/linux-${{ matrix.config.arch }}/gtk/inst/bin/:$PATH" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=/home/ardour/linux-${{ matrix.config.arch }}/gtk/inst/lib/pkgconfig/:/usr/lib/i386-linux-gnu/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig/" >> $GITHUB_ENV
+          echo "PYTHONPATH=./:/home/ardour/linux-${{ matrix.config.arch }}/gtk/inst/lib/python`python --version 2>&1 | cut -d ' ' -f 2 | cut -b 1-3`/site-packages/" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/home/ardour/linux-${{ matrix.config.arch }}/gtk/inst/lib/" >> $GITHUB_ENV
+
+      - name: Print env
+        shell: bash
+        run: |
+          env
+
+      - name: Install Build Stack
+        shell: bash
+        run: |
+          bash /home/ardour/ci/build-stack
+
+      - name: Compile
+        # --depstack-root defaults to ~ 
+        shell: bash
+        run: |
+          cd /home/ardour/src
+          python3 ./waf configure --strict --prefix=/usr --configdir=/etc --libjack=weak --ptformat --with-backends=jack,alsa,pulseaudio,dummy --optimize --cxx11 --freedesktop
+          python3 ./waf -j$(nproc)
+          python3 ./waf install
 
       - name: Package
         shell: bash
         run: |
-          cd ${{ github.workspace }}/src/tools/linux_packaging
-          ./build --public --harvid
-          ./package --public --singlearch --makeself
+          cd /home/ardour/src/tools/linux_packaging
+          bash ./build --public --harvid
+          bash ./package --public --singlearch --makeself
 
-      # - name: Upload Binary
-      #   # Ardour-6.8.97-x86_64.run
-      #   shell: bash
-      #   run: |
-      #       TEMP_DOWNLOAD_URL=$(sh ${{ github.workspace }}/ci/services/${{ env.UPLOAD_SERVICE }}.sh ${{ github.workspace }}/tmp/Ardour-*-${{ matrix.config.warch }}-Setup.exe)
-      #       echo Download URL is $TEMP_DOWNLOAD_URL. 
-      # - name: Upload Artifact
-      #   uses: actions/upload-artifact@v2
-      #   with:
-      #     name: Ardour-Cross-Compile-Win-Artifact
-      #     path: |
-      #       ${{ github.workspace }}/tmp/Ardour-*-${{ matrix.config.warch }}-Setup.exe
+      - name: Upload Binary
+        # Ardour-6.8.0-x86_64.run
+        shell: bash
+        run: |
+            TEMP_DOWNLOAD_URL=$(sh /home/ardour/ci/services/${{ env.UPLOAD_SERVICE }}.sh /home/ardour/src/tools/linux_packaging/Ardour-*-${{ matrix.config.arch }}.run)
+            echo Download URL is $TEMP_DOWNLOAD_URL
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: Ardour-Linux-Artifact
+          path: |
+            ${{ github.workspace }}/src/tools/linux_packaging/Ardour-*-${{ matrix.config.arch }}.run

@@ -1,0 +1,121 @@
+diff -r -u ../s/libsndfile-1.0.25/src/rf64.c ./src/rf64.c
+--- ../s/libsndfile-1.0.25/src/rf64.c	2011-01-19 05:10:44.000000000 -0500
++++ ./src/rf64.c	2015-09-08 15:13:40.212428550 -0400
+@@ -41,6 +41,8 @@
+ ** Macros to handle big/little endian issues.
+ */
+ #define	RF64_MARKER		MAKE_MARKER ('R', 'F', '6', '4')
++#define	RIFF_MARKER		MAKE_MARKER ('R', 'I', 'F', 'F')
++#define	JUNK_MARKER		MAKE_MARKER ('J', 'U', 'N', 'K')
+ #define	FFFF_MARKER		MAKE_MARKER (0xff, 0xff, 0xff, 0xff)
+ #define	WAVE_MARKER		MAKE_MARKER ('W', 'A', 'V', 'E')
+ #define	ds64_MARKER		MAKE_MARKER ('d', 's', '6', '4')
+@@ -52,6 +54,12 @@
+ #define OggS_MARKER		MAKE_MARKER ('O', 'g', 'g', 'S')
+ #define wvpk_MARKER 	MAKE_MARKER ('w', 'v', 'p', 'k')
+ 
++/* the file size limit in bytes below which we can, if requested,
++   write this file as a RIFF/WAVE file.
++*/
++   
++#define RIFF_DOWNGRADE_BYTES 4294967296
++
+ /*------------------------------------------------------------------------------
+ ** Typedefs.
+ */
+@@ -550,7 +558,11 @@
+ rf64_write_header (SF_PRIVATE *psf, int calc_length)
+ {	sf_count_t	current ;
+ 	int 		error = 0, has_data = SF_FALSE ;
++	WAV_PRIVATE    *wpriv;
+ 
++	if ((wpriv = psf->container_data) == NULL)
++		return SFE_INTERNAL ;
++	
+ 	current = psf_ftell (psf) ;
+ 
+ 	if (psf->dataoffset > 0 && current > psf->dataoffset)
+@@ -572,10 +584,16 @@
+ 	psf->headindex = 0 ;
+ 	psf_fseek (psf, 0, SEEK_SET) ;
+ 
+-	psf_binheader_writef (psf, "em4m", RF64_MARKER, 0xffffffff, WAVE_MARKER) ;
+-
+-	/* Currently no table. */
+-	psf_binheader_writef (psf, "m48884", ds64_MARKER, 28, psf->filelength - 8, psf->datalength, psf->sf.frames, 0) ;
++	if (wpriv->rf64_downgrade && (psf->filelength < RIFF_DOWNGRADE_BYTES))
++	{	psf_binheader_writef (psf, "etm8m", RIFF_MARKER, (psf->filelength < 8) ? 8 : psf->filelength - 8, WAVE_MARKER) ;
++		psf_binheader_writef (psf, "m48884", JUNK_MARKER, 28, 0, 0, 0, 0) ;
++		}
++	else
++	{
++		psf_binheader_writef (psf, "em4m", RF64_MARKER, 0xffffffff, WAVE_MARKER) ;
++		/* Currently no table. */
++		psf_binheader_writef (psf, "m48884", ds64_MARKER, 28, psf->filelength - 8, psf->datalength, psf->sf.frames, 0) ;
++		} ;
+ 
+ 	/* WAVE and 'fmt ' markers. */
+ 	psf_binheader_writef (psf, "m", fmt_MARKER) ;
+@@ -648,7 +666,10 @@
+ 
+ #endif
+ 
+-	psf_binheader_writef (psf, "m4", data_MARKER, 0xffffffff) ;
++	if (wpriv->rf64_downgrade && (psf->filelength < RIFF_DOWNGRADE_BYTES))
++		psf_binheader_writef (psf, "tm8", data_MARKER, psf->datalength) ;
++	else
++		psf_binheader_writef (psf, "m4", data_MARKER, 0xffffffff) ;
+ 
+ 	psf_fwrite (psf->header, psf->headindex, 1, psf) ;
+ 	if (psf->error)
+@@ -677,7 +698,7 @@
+ 
+ 		psf->write_header (psf, SF_TRUE) ;
+ 		} ;
+-
++	         
+ 	return 0 ;
+ } /* rf64_close */
+ 
+@@ -707,6 +728,10 @@
+ 			wpriv->wavex_channelmask = wavex_gen_channel_mask (psf->channel_map, psf->sf.channels) ;
+ 			return (wpriv->wavex_channelmask != 0) ;
+ 
++		case SFC_AUTO_DOWNGRADE_RF64 :
++			wpriv->rf64_downgrade = SF_TRUE;
++			return SF_TRUE;
++			
+ 		default :
+ 			break ;
+ 	} ;
+diff -r -u ../s/libsndfile-1.0.25/src/sndfile.h.in ./src/sndfile.h.in
+--- ../s/libsndfile-1.0.25/src/sndfile.h.in	2011-06-23 05:13:17.000000000 -0400
++++ ./src/sndfile.h.in	2015-09-08 15:35:49.049584140 -0400
+@@ -191,6 +191,12 @@
+ 	SFC_WAVEX_SET_AMBISONIC			= 0x1200,
+ 	SFC_WAVEX_GET_AMBISONIC			= 0x1201,
+ 
++	/* RF64 files can be set so that on-close, writable files that
++	   have less than 4GB of data in them are converted to RIFF/WAV,
++	   as per EBU recommendations.
++	*/
++	SFC_AUTO_DOWNGRADE_RF64			= 0x1210,
++
+ 	SFC_SET_VBR_ENCODING_QUALITY	= 0x1300,
+ 
+ 	/* Following commands for testing only. */
+Only in ../s/libsndfile-1.0.25/src: version-metadata.rc
+diff -r -u ../s/libsndfile-1.0.25/src/wav_w64.h ./src/wav_w64.h
+--- ../s/libsndfile-1.0.25/src/wav_w64.h	2011-01-19 05:08:32.000000000 -0500
++++ ./src/wav_w64.h	2015-09-08 13:50:22.371390381 -0400
+@@ -264,6 +264,10 @@
+ 	/* Set to true when 'fmt ' chunk is ambiguous.*/
+ 	int fmt_is_broken ;
+ 	WAV_FMT wav_fmt ;
++	/* set to true when RF64 should be converted back to RIFF
++	   when writing the header.
++	*/
++	int rf64_downgrade;
+ } WAV_PRIVATE ;
+ 
+ #define		WAV_W64_GSM610_BLOCKSIZE	65

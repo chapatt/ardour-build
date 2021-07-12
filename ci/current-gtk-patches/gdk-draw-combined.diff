@@ -1,0 +1,456 @@
+diff --git a/gdk/gdkwindow.c b/gdk/gdkwindow.c
+index d48751e..a7582c2 100644
+--- a/gdk/gdkwindow.c
++++ b/gdk/gdkwindow.c
+@@ -117,7 +117,9 @@
+  * remove a custom clip region.
+  */
+ 
++#ifndef __APPLE__
+ #define USE_BACKING_STORE	/* Appears to work on Win32, too, now. */
++#endif
+ 
+ /* This adds a local value to the GdkVisibilityState enum */
+ #define GDK_VISIBILITY_NOT_VIEWABLE 3
+@@ -5417,6 +5419,15 @@ _gdk_window_process_updates_recurse (GdkWindow *window,
+ 	{
+ 	  GdkEvent event;
+ 
++#ifdef __APPLE__
++	  /* we no longer double-buffer on macOS/quartz, but double-buffering has seeped
++	     into GTK sufficiently that several widgets rely on the background paint that
++	     gdk_window_begin_paint_region() would do. So here we sort-of-explicitly paint
++	     the window directly to provide the same starting point for the window drawing
++	     that will take place as the expose is processed.
++	  */
++	  gdk_window_clear_region_internal (window, expose_region, FALSE);
++#endif
+ 	  event.expose.type = GDK_EXPOSE;
+ 	  event.expose.window = g_object_ref (window);
+ 	  event.expose.send_event = FALSE;
+diff --git a/gdk/quartz/GdkQuartzView.c b/gdk/quartz/GdkQuartzView.c
+index 6b8d6d0..8da253f 100644
+--- a/gdk/quartz/GdkQuartzView.c
++++ b/gdk/quartz/GdkQuartzView.c
+@@ -650,6 +650,7 @@
+     }
+ 
+   impl->in_paint_rect_count++;
++  /* this essentially generates an expose event */
+   _gdk_window_process_updates_recurse (gdk_window, region);
+   impl->in_paint_rect_count--;
+ 
+diff --git a/gdk/quartz/gdkdrawable-quartz.c b/gdk/quartz/gdkdrawable-quartz.c
+index 503ea83..7a432dd 100644
+--- a/gdk/quartz/gdkdrawable-quartz.c
++++ b/gdk/quartz/gdkdrawable-quartz.c
+@@ -835,51 +835,6 @@ gdk_quartz_drawable_get_context (GdkDrawable *drawable,
+   return GDK_DRAWABLE_IMPL_QUARTZ_GET_CLASS (drawable)->get_context (drawable, antialias);
+ }
+ 
+-/* Help preventing "beam sync penalty" where CG makes all graphics code
+- * block until the next vsync if we try to flush (including call display on
+- * a view) too often. We do this by limiting the manual flushing done
+- * outside of expose calls to less than some frequency when measured over
+- * the last 4 flushes. This is a bit arbitray, but seems to make it possible
+- * for some quick manual flushes (such as gtkruler or gimp's marching ants)
+- * without hitting the max flush frequency.
+- *
+- * If drawable NULL, no flushing is done, only registering that a flush was
+- * done externally.
+- */
+-void
+-_gdk_quartz_drawable_flush (GdkDrawable *drawable)
+-{
+-  static struct timeval prev_tv;
+-  static gint intervals[4];
+-  static gint index;
+-  struct timeval tv;
+-  gint ms;
+-
+-  gettimeofday (&tv, NULL);
+-  ms = (tv.tv_sec - prev_tv.tv_sec) * 1000 + (tv.tv_usec - prev_tv.tv_usec) / 1000;
+-  intervals[index++ % 4] = ms;
+-
+-  if (drawable)
+-    {
+-      ms = intervals[0] + intervals[1] + intervals[2] + intervals[3];
+-
+-      /* ~25Hz on average. */
+-      if (ms > 4*40)
+-        {
+-          if (GDK_IS_WINDOW_IMPL_QUARTZ (drawable))
+-            {
+-              GdkWindowImplQuartz *window_impl = GDK_WINDOW_IMPL_QUARTZ (drawable);
+-
+-              [window_impl->toplevel flushWindow];
+-            }
+-
+-          prev_tv = tv;
+-        }
+-    }
+-  else
+-    prev_tv = tv;
+-}
+-
+ void
+ gdk_quartz_drawable_release_context (GdkDrawable  *drawable, 
+ 				     CGContextRef  cg_context)
+@@ -894,7 +849,6 @@ gdk_quartz_drawable_release_context (GdkDrawable  *drawable,
+       /* See comment in gdk_quartz_drawable_get_context(). */
+       if (window_impl->in_paint_rect_count == 0)
+         {
+-          _gdk_quartz_drawable_flush (drawable);
+           [window_impl->view unlockFocus];
+         }
+     }
+diff --git a/gdk/quartz/gdkprivate-quartz.h b/gdk/quartz/gdkprivate-quartz.h
+index b78c353..8c09fcb 100644
+--- a/gdk/quartz/gdkprivate-quartz.h
++++ b/gdk/quartz/gdkprivate-quartz.h
+@@ -202,7 +202,6 @@ void         _gdk_quartz_synthesize_null_key_event (GdkWindow *window);
+ 
+ /* Drawable */
+ void        _gdk_quartz_drawable_finish (GdkDrawable *drawable);
+-void        _gdk_quartz_drawable_flush  (GdkDrawable *drawable);
+ 
+ /* Geometry */
+ void        _gdk_quartz_window_scroll      (GdkWindow       *window,
+diff --git a/gdk/quartz/gdkwindow-quartz.c b/gdk/quartz/gdkwindow-quartz.c
+index 620f46a..444e6ec 100644
+--- a/gdk/quartz/gdkwindow-quartz.c
++++ b/gdk/quartz/gdkwindow-quartz.c
+@@ -30,9 +30,6 @@
+ 
+ static gpointer parent_class;
+ 
+-static GSList   *update_nswindows;
+-static gboolean  in_process_all_updates = FALSE;
+-
+ static GSList *main_window_stack;
+ 
+ #define FULLSCREEN_DATA "fullscreen-data"
+@@ -98,8 +95,8 @@ gdk_window_impl_quartz_get_context (GdkDrawable *drawable,
+    */
+   if (window_impl->in_paint_rect_count == 0)
+     {
+-      if (![window_impl->view lockFocusIfCanDraw])
+-        return NULL;
++	    // if (![window_impl->view lockFocusIfCanDraw])
++	    // return NULL;
+     }
+ 
+   cg_context = [[NSGraphicsContext currentContext] graphicsPort];
+@@ -216,140 +213,49 @@ gdk_window_impl_quartz_init (GdkWindowImplQuartz *impl)
+ }
+ 
+ static void
+-gdk_window_impl_quartz_begin_paint_region (GdkPaintable    *paintable,
+-                                           GdkWindow       *window,
+-					   const GdkRegion *region)
+-{
+-  GdkWindowImplQuartz *impl = GDK_WINDOW_IMPL_QUARTZ (paintable);
+-  GdkWindowObject *private = (GdkWindowObject*)window;
+-  int n_rects;
+-  GdkRectangle *rects = NULL;
+-  GdkPixmap *bg_pixmap;
+-  GdkRegion *clipped_and_offset_region;
+-  gboolean free_clipped_and_offset_region = TRUE;
+-
+-  bg_pixmap = private->bg_pixmap;
+-
+-  clipped_and_offset_region = gdk_region_copy (region);
+-
+-  gdk_region_intersect (clipped_and_offset_region,
+-                        private->clip_region_with_children);
+-  gdk_region_offset (clipped_and_offset_region,
+-                     private->abs_x, private->abs_y);
+-
+-  if (impl->begin_paint_count == 0)
+-    {
+-      impl->paint_clip_region = clipped_and_offset_region;
+-      free_clipped_and_offset_region = FALSE;
+-    }
+-  else
+-    gdk_region_union (impl->paint_clip_region, clipped_and_offset_region);
+-
+-  impl->begin_paint_count++;
+-
+-  if (bg_pixmap == GDK_NO_BG)
+-    goto done;
+-
+-  gdk_region_get_rectangles (clipped_and_offset_region, &rects, &n_rects);
+-
+-  if (n_rects == 0)
+-    goto done;
+-
+-  if (bg_pixmap == NULL)
+-    {
+-      CGContextRef cg_context;
+-      CGColorRef color;
+-      gint i;
+-
+-      cg_context = gdk_quartz_drawable_get_context (GDK_DRAWABLE (impl), FALSE);
+-      color = _gdk_quartz_colormap_get_cgcolor_from_pixel (window,
+-                                                           private->bg_color.pixel);
+-      CGContextSetFillColorWithColor (cg_context, color);
+-      CGColorRelease (color);
+- 
+-      for (i = 0; i < n_rects; i++)
+-        {
+-          CGContextFillRect (cg_context,
+-                             CGRectMake (rects[i].x, rects[i].y,
+-                                         rects[i].width, rects[i].height));
+-        }
+-
+-      gdk_quartz_drawable_release_context (GDK_DRAWABLE (impl), cg_context);
+-    }
+-  else
+-    {
+-      int x, y;
+-      int x_offset, y_offset;
+-      int width, height;
+-      GdkGC *gc;
+-
+-      x_offset = y_offset = 0;
+-
+-      while (window && bg_pixmap == GDK_PARENT_RELATIVE_BG)
+-        {
+-          /* If this window should have the same background as the parent,
+-           * fetch the parent. (And if the same goes for the parent, fetch
+-           * the grandparent, etc.)
+-           */
+-          x_offset += ((GdkWindowObject *) window)->x;
+-          y_offset += ((GdkWindowObject *) window)->y;
+-          window = GDK_WINDOW (((GdkWindowObject *) window)->parent);
+-          bg_pixmap = ((GdkWindowObject *) window)->bg_pixmap;
+-        }
+-
+-      if (bg_pixmap == NULL || bg_pixmap == GDK_NO_BG || bg_pixmap == GDK_PARENT_RELATIVE_BG)
+-        {
+-          /* Parent relative background but the parent doesn't have a
+-           * pixmap.
+-           */ 
+-          goto done;
+-        }
+-
+-      /* Note: There should be a CG API to draw tiled images, we might
+-       * want to look into that for this. 
+-       */
+-      gc = gdk_gc_new (GDK_DRAWABLE (impl));
+-
+-      gdk_drawable_get_size (GDK_DRAWABLE (bg_pixmap), &width, &height);
+-
+-      x = -x_offset;
+-      while (x < (rects[0].x + rects[0].width))
+-        {
+-          if (x + width >= rects[0].x)
+-	    {
+-              y = -y_offset;
+-              while (y < (rects[0].y + rects[0].height))
+-                {
+-                  if (y + height >= rects[0].y)
+-                    gdk_draw_drawable (GDK_DRAWABLE (impl), gc, bg_pixmap, 0, 0, x, y, width, height);
+-		  
+-                  y += height;
+-                }
+-            }
+-          x += width;
+-        }
++_gdk_window_quartz_clear_region (GdkWindow *window, const GdkRegion* region, bool ignored)
++{
++  if (gdk_drawable_get_colormap (window) != gdk_screen_get_rgba_colormap (_gdk_screen)) {
++
++	  /* Window is opaque. We no longer use backing store on Quartz, so the code that fill the backing store with the background
++	   * color is no longer in use. We do that here, if there is a background color.
++	   */
++
++	  GdkWindowObject *private = GDK_WINDOW_OBJECT(window);
++	  GdkWindowImplQuartz *impl = GDK_WINDOW_IMPL_QUARTZ (private->impl);
++
++	  GdkColor bg_color = private->bg_color;
++	  CGContextRef cg_context = [[NSGraphicsContext currentContext] graphicsPort];
++	  CGContextSaveGState (cg_context);
++
++	  if (g_getenv ("GDK_HARLEQUIN_DEBUGGING")) {
++		  CGContextSetRGBFillColor (cg_context,
++		                            (random() % 65535) / 65335.0,
++		                            (random() % 65535) / 65335.0,
++		                            (random() % 65535) / 65335.0,
++		                            1.0);
++	  } else {
++		  CGContextSetRGBFillColor (cg_context,
++		                            bg_color.red / 65335.0,
++		                            bg_color.green / 65335.0,
++		                            bg_color.blue / 65335.0,
++		                            1.0);
++	  }
+ 
+-      g_object_unref (gc);
+-    }
++	  GdkRectangle *rects;
++	  gint n_rects, i;
+ 
+- done:
+-  if (free_clipped_and_offset_region)
+-    gdk_region_destroy (clipped_and_offset_region);
+-  g_free (rects);
+-}
++	  gdk_region_get_rectangles (region, &rects, &n_rects);
+ 
+-static void
+-gdk_window_impl_quartz_end_paint (GdkPaintable *paintable)
+-{
+-  GdkWindowImplQuartz *impl = GDK_WINDOW_IMPL_QUARTZ (paintable);
++	  for (i = 0; i < n_rects; i++)
++	  {
++		  CGRect cg_rect = CGRectMake (rects[i].x + 0.5, rects[i].y + 0.5, rects[i].width, rects[i].height);
+ 
+-  impl->begin_paint_count--;
++		  CGContextFillRect (cg_context, cg_rect);
++	  }
+ 
+-  if (impl->begin_paint_count == 0)
+-    {
+-      gdk_region_destroy (impl->paint_clip_region);
+-      impl->paint_clip_region = NULL;
+-    }
++	  CGContextRestoreGState (cg_context);
++  }
+ }
+ 
+ void
+@@ -404,90 +310,20 @@ void
+ _gdk_windowing_window_process_updates_recurse (GdkWindow *window,
+                                                GdkRegion *region)
+ {
+-  /* Make sure to only flush each toplevel at most once if we're called
+-   * from process_all_updates.
+-   */
+-  if (in_process_all_updates)
+-    {
+-      GdkWindow *toplevel;
+-
+-      toplevel = gdk_window_get_effective_toplevel (window);
+-      if (toplevel && WINDOW_IS_TOPLEVEL (toplevel))
+-        {
+-          GdkWindowObject *toplevel_private;
+-          GdkWindowImplQuartz *toplevel_impl;
+-          NSWindow *nswindow;
+-
+-          toplevel_private = (GdkWindowObject *)toplevel;
+-          toplevel_impl = (GdkWindowImplQuartz *)toplevel_private->impl;
+-          nswindow = toplevel_impl->toplevel;
+-
+-          /* In theory, we could skip the flush disabling, since we only
+-           * have one NSView.
+-           */
+-          if (nswindow && ![nswindow isFlushWindowDisabled]) 
+-            {
+-              [nswindow retain];
+-              [nswindow disableFlushWindow];
+-              update_nswindows = g_slist_prepend (update_nswindows, nswindow);
+-            }
+-        }
+-    }
+-
+   if (WINDOW_IS_TOPLEVEL (window))
+     _gdk_quartz_window_set_needs_display_in_region (window, region);
+   else
+     _gdk_window_process_updates_recurse (window, region);
+-
+-  /* NOTE: I'm not sure if we should displayIfNeeded here. It slows down a
+-   * lot (since it triggers the beam syncing) and things seem to work
+-   * without it.
+-   */
+ }
+ 
+ void
+ _gdk_windowing_before_process_all_updates (void)
+ {
+-  in_process_all_updates = TRUE;
+-
+-  NSDisableScreenUpdates ();
+ }
+ 
+ void
+ _gdk_windowing_after_process_all_updates (void)
+ {
+-  GSList *old_update_nswindows = update_nswindows;
+-  GSList *tmp_list = update_nswindows;
+-
+-  update_nswindows = NULL;
+-
+-  while (tmp_list)
+-    {
+-      NSWindow *nswindow = tmp_list->data;
+-
+-      [[nswindow contentView] displayIfNeeded];
+-
+-      _gdk_quartz_drawable_flush (NULL);
+-
+-      [nswindow enableFlushWindow];
+-      [nswindow flushWindow];
+-      [nswindow release];
+-
+-      tmp_list = tmp_list->next;
+-    }
+-
+-  g_slist_free (old_update_nswindows);
+-
+-  in_process_all_updates = FALSE;
+-
+-  NSEnableScreenUpdates ();
+-}
+-
+-static void
+-gdk_window_impl_quartz_paintable_init (GdkPaintableIface *iface)
+-{
+-  iface->begin_paint_region = gdk_window_impl_quartz_begin_paint_region;
+-  iface->end_paint = gdk_window_impl_quartz_end_paint;
+ }
+ 
+ GType
+@@ -510,14 +346,7 @@ _gdk_window_impl_quartz_get_type (void)
+ 	  (GInstanceInitFunc) gdk_window_impl_quartz_init,
+ 	};
+ 
+-      const GInterfaceInfo paintable_info = 
+-	{
+-	  (GInterfaceInitFunc) gdk_window_impl_quartz_paintable_init,
+-	  NULL,
+-	  NULL
+-	};
+-
+-      const GInterfaceInfo window_impl_info = 
++      const GInterfaceInfo window_impl_info =
+ 	{
+ 	  (GInterfaceInitFunc) gdk_window_impl_iface_init,
+ 	  NULL,
+@@ -527,9 +356,7 @@ _gdk_window_impl_quartz_get_type (void)
+       object_type = g_type_register_static (GDK_TYPE_DRAWABLE_IMPL_QUARTZ,
+                                             "GdkWindowImplQuartz",
+                                             &object_info, 0);
+-      g_type_add_interface_static (object_type,
+-				   GDK_TYPE_PAINTABLE,
+-				   &paintable_info);
++
+       g_type_add_interface_static (object_type,
+ 				   GDK_TYPE_WINDOW_IMPL,
+ 				   &window_impl_info);
+diff --git a/gtk/gtkwidget.c b/gtk/gtkwidget.c
+index 1d1f6bb..9f0d89d 100644
+--- a/gtk/gtkwidget.c
++++ b/gtk/gtkwidget.c
+@@ -6234,7 +6234,11 @@ gtk_widget_set_double_buffered (GtkWidget *widget,
+ {
+   g_return_if_fail (GTK_IS_WIDGET (widget));
+ 
++#ifdef __APPLE__
++  double_buffered = FALSE;
++#else
+   double_buffered = (double_buffered != FALSE);
++#endif
+ 
+   if (double_buffered != gtk_widget_get_double_buffered (widget))
+     {

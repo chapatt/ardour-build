@@ -1,0 +1,77 @@
+#!/usr/bin/env python
+
+from waflib import TaskGen
+import re
+
+# Get waf to do %FOO% substitution rather than @FOO@
+TaskGen.re_m4 = re.compile('%%(\w+)%%', re.M)
+
+api_headers = '''
+        rubberband/rubberband-c.h
+        rubberband/RubberBandStretcher.h
+'''
+
+sources = '''
+   src/rubberband-c.cpp
+   src/RubberBandStretcher.cpp
+   src/StretcherProcess.cpp
+   src/StretchCalculator.cpp
+   src/base/Profiler.cpp
+   src/dsp/AudioCurveCalculator.cpp
+   src/audiocurves/CompoundAudioCurve.cpp
+   src/audiocurves/SpectralDifferenceAudioCurve.cpp
+   src/audiocurves/HighFrequencyAudioCurve.cpp
+   src/audiocurves/SilentAudioCurve.cpp
+   src/audiocurves/ConstantAudioCurve.cpp
+   src/audiocurves/PercussiveAudioCurve.cpp
+   src/dsp/Resampler.cpp
+   src/dsp/FFT.cpp
+   src/system/Allocators.cpp
+   src/system/sysutils.cpp
+   src/system/Thread.cpp
+   src/StretcherChannelData.cpp
+   src/StretcherImpl.cpp
+  '''
+
+def options(opt):
+    opt.load('compiler_c')
+    opt.load('compiler_cxx')
+    pass
+
+def configure(conf):
+    conf.load('compiler_c')
+    conf.load('compiler_cxx')
+    conf.check_cfg (package='fftw3', uselib_store='FFTW3', args=['--cflags', '--libs'], mandatory=True)
+    conf.check_cfg (package='fftw3f', uselib_store='FFTW3F',  args=['--cflags', '--libs'], mandatory=True)
+    conf.check_cfg (package='sndfile', uselib_store='SNDFILE', args=['--cflags', '--libs'], mandatory=True)
+    conf.check_cfg (package='samplerate', uselib_store='SAMPLERATE', args=['--cflags', '--libs'], mandatory=True)
+    conf.check_cfg (package='vamp-sdk', uselib_store='Vamp', args=['--cflags', '--libs'], mandatory=True)
+    conf.env.append_value('CXXFLAGS', '-DHAVE_FFTW3')
+    conf.env.append_value('CXXFLAGS', '-DHAVE_SNDFILE')
+    conf.env.append_value('CXXFLAGS', '-DHAVE_LIBSAMPLERATE')
+    conf.env.append_value('CXXFLAGS', '-DHAVE_Vamp')
+    conf.env.append_value('CXXFLAGS', '-DUSE_PTHREADS')
+    conf.env.append_value('CFLAGS', '-DHAVE_FFTW3')
+    conf.env.append_value('CFLAGS', '-DHAVE_SNDFILE')
+    conf.env.append_value('CFLAGS', '-DHAVE_LIBSAMPLERATE')
+    conf.env.append_value('CFLAGS', '-DHAVE_Vamp')
+    conf.env.append_value('CFLAGS', '-DUSE_PTHREADS')
+
+def build(bld):
+    bld.shlib (source = sources,
+               includes = [ '.', './src' ],
+               target = 'rubberband',
+               name = 'rubberband',
+               uselib = 'FFTW3 FFTW3F SNDFILE SAMPLERATE Vamp',
+               features = 'cxx cxxshlib',
+               vnum = '2.1.0',
+               )
+    
+    bld.install_files ('${PREFIX}/include/rubberband', api_headers)
+
+    pc = bld (features = 'subst',
+              source = 'rubberband.pc.in',
+              target = 'rubberband.pc',
+              install_path = '${PREFIX}/lib/pkgconfig',
+              dict = {'PREFIX' : bld.env.PREFIX },
+              )
