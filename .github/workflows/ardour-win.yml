@@ -3,18 +3,18 @@ name: Ardour Cross Compile Build for Windows
 on:
   push:
     branches: 
-      - x-win
+      - win
     paths-ignore:
       - 'README.md'
       - 'LICENSE'
   pull_request:
     branches: 
-      - x-win
+      - win
     paths-ignore:
       - 'README.md'
       - 'LICENSE'
   repository_dispatch:
-    types: ardour-x-win-build
+    types: ardour-win-build
 
 env:
   ARDOUR_VERSION: 6.8
@@ -90,7 +90,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           fetch-depth: 0
-          ref: x-win
+          ref: win
           path: '.'
 
       # - name: Get Ardour Latest Release Source Code
