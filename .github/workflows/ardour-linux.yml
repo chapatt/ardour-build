@@ -138,6 +138,7 @@ jobs:
           cd /home/ardour/src
           python3 ./waf configure --strict --prefix=/usr --configdir=/etc --libjack=weak --ptformat --with-backends=jack,alsa,pulseaudio,dummy --optimize --cxx11 --freedesktop
           python3 ./waf -j$(nproc)
+          python3 ./waf i18n
           python3 ./waf install
 
       - name: Package
