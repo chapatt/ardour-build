@@ -1,4 +1,4 @@
-name: Ardour Cross Compile Build
+name: Ardour Build for MacOS
 
 on:
   push:
@@ -42,10 +42,17 @@ jobs:
 
       #     mv -v cacert.pem /usr/local/etc/openssl@1.1/certs
 
-      # - name: Set Env
-      #   shell: bash
-      #   run: |
-      #     echo "CURL_CA_BUNDLE=/usr/local/etc/openssl/certs" >> $GITHUB_ENV
+      # https://command-not-found.com/cpanm
+      - name: Install XML::Parser perl module
+        shell: bash
+        run: |
+          brew install cpanminus
+          cpanm XML::Parser
+
+      - name: Check XML::Parser perl module
+        shell: bash
+        run: |
+          perl -e "require XML::Parser"
 
       - name: Checkout Build Tools
         uses: actions/checkout@v2
@@ -63,10 +70,13 @@ jobs:
           ref: ${{ env.ARDOUR_VERSION }}
           path: './src'
         
-      - name: Print Clang Version
+      - name: Print Clang & Perl Version
+        # https://stackoverflow.com/a/20874420
         shell: bash
         run: |
           clang --version
+          echo "==============================================="
+          perl -V
 
       - name: Prepare
         shell: bash
@@ -75,14 +85,17 @@ jobs:
           chmod a+x ${{ github.workspace }}/ci/rb-wscript
           chmod a+x ${{ github.workspace }}/ci/vamp-wscript
 
+      # https://stackoverflow.com/questions/11287564/getting-sed-error-illegal-byte-sequence-in-bash
       - name: Set env
         shell: bash
         run: |
+          echo "LC_CTYPE=C" >> $GITHUB_ENV
           echo "HOME=${{ github.workspace }}/macos-${{ matrix.config.arch }}" >> $GITHUB_ENV
           echo "PATH=/usr/lib/ccache:${{ github.workspace }}/macos-${{ matrix.config.arch }}/bin:${{ github.workspace }}/macos-${{ matrix.config.arch }}/gtk/inst/bin/:$PATH" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=${{ github.workspace }}/macos-${{ matrix.config.arch }}/gtk/inst/lib/pkgconfig/:/usr/lib/i386-linux-gnu/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig/" >> $GITHUB_ENV
           echo "PYTHONPATH=./:${{ github.workspace }}/macos-${{ matrix.config.arch }}/gtk/inst/lib/python`python --version 2>&1 | cut -d ' ' -f 2 | cut -b 1-3`/site-packages/" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/macos-${{ matrix.config.arch }}/gtk/inst/lib/" >> $GITHUB_ENV
+          echo "PERL5LIB=/usr/local/Cellar/perl/`perl -e 'print substr($^V, 1)'`/lib/perl5/site_perl/`perl -e 'print substr($^V, 1)'`:/usr/local/Cellar/perl/`perl -e 'print substr($^V, 1)'`/lib/perl5/`perl -e 'print substr($^V, 1)'`:/usr/local/lib/perl5/site_perl/`perl -e 'print substr($^V, 1)'`:" >> $GITHUB_ENV
       
       - name: Print env
         shell: bash
@@ -93,14 +106,18 @@ jobs:
         shell: bash
         run: |
           bash ${{ github.workspace }}/ci/build-stack
+        # env:
+        #   LC_CTYPE: C
 
       - name: Compile
         # --depstack-root defaults to ~ 
+        # nproc returns logical cores. The mac equivalent of that is sysctl -n hw.logicalcpu instead of sysctl -n hw.physicalcpu
         shell: bash
         run: |
           cd ${{ github.workspace }}/src
           python3 ./waf configure --strict --with-backends=jack,coreaudio,dummy --ptformat --optimize
-          python3 ./waf -j$(nproc)
+          python3 ./waf -j$(sysctl -n hw.logicalcpu)
+          python3 ./waf i18n
           python3 ./waf install
 
       - name: Package
