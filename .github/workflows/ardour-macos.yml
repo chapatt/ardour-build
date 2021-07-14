@@ -2,9 +2,17 @@ name: Ardour Build for MacOS
 
 on:
   push:
-    branches: [ macos ]
+    branches: 
+      - macos
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
   pull_request:
-    branches: [ macos ]
+    branches: 
+      - macos
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
   repository_dispatch:
     types: ardour-macos-build
 
