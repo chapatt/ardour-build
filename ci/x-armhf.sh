@@ -487,6 +487,7 @@ src nss-3.25 tar.gz https://ftp.mozilla.org/pub/security/nss/releases/NSS_3_25_R
 	sed -i.bak "s/CCC\t\t\t=.*$/CCC=$XPREFIX-g++/" coreconf/Linux.mk
 	sed -i.bak "s/RANLIB\t\t\t=.*$/RANLIB=$XPREFIX-ranlib/" coreconf/Linux.mk
 	sed -i.bak 's/-m32$//;s/-Di386$//;s/x86$/arm/' coreconf/Linux.mk
+	sed -i.bak 's/strncpy(cp, "..\/", 3);/memcpy(cp, "..\/", 3);/g' coreconf/nsinstall/pathsub.c
 if test "$XARCH" = "arm64"; then
 	sed -i.bak 's/-DMP_ASSEMBLY_MULTIPLY -DMP_ASSEMBLY_SQUARE/-DNSS_USE_64/;s/-DSHA_NO_LONG_LONG//;s/mpi_arm.c//' lib/freebl/Makefile
 fi
