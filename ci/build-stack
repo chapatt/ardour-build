@@ -302,7 +302,8 @@ done
 # the third form is required for libjpeg whose packaging and naming is totally inconsistent
 #    with normal practice
 #
-defmod 'xz' '5.2.2' "http://tukaani.org/xz/" 'bz2'
+# defmod 'xz' '5.2.2' "http://tukaani.org/xz/" 'bz2'
+defmod 'xz' '5.2.5' "http://tukaani.org/xz/" 'gz'
 defmod 'tar' '1.27' "http://ftpmirror.gnu.org/tar/" 'bz2'
 defmod 'libarchive' '3.2.1' "http://www.libarchive.org/downloads/" 'gz'
 defmod 'm4' '1.4.18' "http://ftpmirror.gnu.org/m4/" 'bz2'
