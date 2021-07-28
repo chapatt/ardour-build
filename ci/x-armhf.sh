@@ -505,7 +505,7 @@ exec_prefix=\${prefix}
 libdir=\${exec_prefix}/lib
 includedir=\${prefix}/include
 Name: NSS
-Version: 3.45
+Version: 3.25
 Description: Network Security S
 Libs: -L\${libdir} -lssl3 -lsmime3 -lnss3 -lplds4 -lplc4 -lnspr4 -lnssutil3 -lpthread -ldl
 Cflags: -I\${includedir}/nss3 -I\${includedir}/nss3api -I\${includedir}/nss3private
