@@ -28,7 +28,7 @@
 
 Now pre-built packages are available on:
 
-- Linux x86_64
+- Linux x86_64, armhf, arm64
 - MacOS Intel x86_64
 - Windows x86, x86_64
 
