@@ -34,7 +34,8 @@ jobs:
           - {
               arch: x86_64
             }
-          # - {
+          # - { 
+          #     # requires macOS 11.0 SDK (or later)
           #     arch: arm64
           #   }
     steps:
@@ -95,6 +96,7 @@ jobs:
 
       # https://stackoverflow.com/questions/11287564/getting-sed-error-illegal-byte-sequence-in-bash
       - name: Set env
+        if: matrix.config.arch == 'x86_64'
         shell: bash
         run: |
           echo "LC_CTYPE=C" >> $GITHUB_ENV
@@ -105,17 +107,29 @@ jobs:
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/macos-${{ matrix.config.arch }}/gtk/inst/lib/" >> $GITHUB_ENV
           echo "PERL5LIB=/usr/local/Cellar/perl/`perl -e 'print substr($^V, 1)'`/lib/perl5/site_perl/`perl -e 'print substr($^V, 1)'`:/usr/local/Cellar/perl/`perl -e 'print substr($^V, 1)'`/lib/perl5/`perl -e 'print substr($^V, 1)'`:/usr/local/lib/perl5/site_perl/`perl -e 'print substr($^V, 1)'`:" >> $GITHUB_ENV
       
+      - name: Set env
+        if: matrix.config.arch == 'arm64'
+        shell: bash
+        run: |
+          echo "LC_CTYPE=C" >> $GITHUB_ENV
+          echo "HOME=${{ github.workspace }}/macos-${{ matrix.config.arch }}" >> $GITHUB_ENV
+
       - name: Print env
         shell: bash
         run: |
           env
 
       - name: Install Build Stack
+        if: matrix.config.arch == 'x86_64'
         shell: bash
         run: |
           bash ${{ github.workspace }}/ci/build-stack
-        # env:
-        #   LC_CTYPE: C
+
+      - name: Install Build Stack
+        if: matrix.config.arch == 'arm64'
+        shell: bash
+        run: |
+          bash ${{ github.workspace }}/ci/x-applearm.sh
 
       - name: Compile
         # --depstack-root defaults to ~ 
@@ -135,11 +149,12 @@ jobs:
           bash ./osx_build --nls --public
 
       - name: Upload Binary
-        # ${{ github.workspace }}/src/tools/osx_packaging/Ardour-6.8.104.dmg
+        # ${{ github.workspace }}/src/tools/osx_packaging/Ardour-6.8.0.dmg
+        # ${{ github.workspace }}/src/tools/osx_packaging/Ardour-6.8.0-arm64.dmg
         shell: bash
         run: |
-            TEMP_DOWNLOAD_URL=$(sh ${{ github.workspace }}/ci/services/${{ env.UPLOAD_SERVICE }}.sh ${{ github.workspace }}/src/tools/osx_packaging/Ardour-*.dmg)
-            echo Download URL is $TEMP_DOWNLOAD_URL
+          TEMP_DOWNLOAD_URL=$(sh ${{ github.workspace }}/ci/services/${{ env.UPLOAD_SERVICE }}.sh ${{ github.workspace }}/src/tools/osx_packaging/Ardour-*.dmg)
+          echo Download URL is $TEMP_DOWNLOAD_URL
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v2
