@@ -17,7 +17,7 @@ on:
     types: ardour-win-build
 
 env:
-  ARDOUR_VERSION: 6.8
+  ARDOUR_VERSION: 6.9
   # available upload services: wetransfer.com, file.io, 0x0.st
   UPLOAD_SERVICE: wetransfer.com
   # ardour spurce code tar ball, need check its sha256sums.
