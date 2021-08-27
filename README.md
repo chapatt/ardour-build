@@ -70,6 +70,10 @@ cd tools/linux_packaging
 
 You now have a functioning binary bundle, in the form a .run file.
 
+### Flatpak
+
+Besides, for Linux users there is another way to use Ardour, that is [flatpak]( https://flathub.org/apps/details/org.ardour.Ardour), [github](https://github.com/flathub/org.ardour.Ardour).
+
 
 ### reference
 
