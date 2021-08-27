@@ -860,6 +860,7 @@ LDFLAGS="-L${PREFIX}/lib" \
 DEPSTACK_ROOT="$PREFIX" \
 ./waf configure \
   --strict \
+  --cxx11 \
   --keepflags \
   --also-include=${PREFIX}/include \
   --dist-target=${AARCH} \
