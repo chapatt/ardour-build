@@ -493,7 +493,7 @@ if test "$XARCH" = "arm64"; then
 fi
 	sed -i.bak 's/cmd external_tests//' manifest.mn
 	CROSS_COMPILE=1 MAKEFLAGS=-j1 XCFLAGS="-I${PREFIX}/include/" \
-		make nss_build_all BUILD_OPT=1 NSDISTMODE=copy NSPR_CONFIGURE_OPTS="--target=${XPREFIX} --build=x86_64-linux" NATIVE_CC=gcc
+		make CFLAGS="-Wno-error" nss_build_all BUILD_OPT=1 NSDISTMODE=copy NSPR_CONFIGURE_OPTS="--target=${XPREFIX} --build=x86_64-linux" NATIVE_CC=gcc
 	cp -L ../dist/*.OBJ/lib/*.so $PREFIX/lib/
 	cp -L ../dist/*.OBJ/lib/*.a $PREFIX/lib/
 	cp -r ../dist/*.OBJ/include $PREFIX/include/nss3
