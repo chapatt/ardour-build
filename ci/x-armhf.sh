@@ -480,6 +480,7 @@ wafbuild
 # NSS...
 apt-get -y install libzip-dev
 src nss-3.25 tar.gz https://ftp.mozilla.org/pub/security/nss/releases/NSS_3_25_RTM/src/nss-3.25-with-nspr-4.12.tar.gz -with-nspr-4.12
+# src nss-3.45 tar.gz https://ftp.mozilla.org/pub/security/nss/releases/NSS_3_45_RTM/src/nss-3.45-with-nspr-4.21.tar.gz -with-nspr-4.21
 (
 	cd nss
 	sed -i.bak "s%DSO_LDOPTS\t\t= %DSO_LDOPTS\t\t= -L$PREFIX/lib/ %" coreconf/Linux.mk
@@ -493,7 +494,7 @@ if test "$XARCH" = "arm64"; then
 fi
 	sed -i.bak 's/cmd external_tests//' manifest.mn
 	CROSS_COMPILE=1 MAKEFLAGS=-j1 XCFLAGS="-I${PREFIX}/include/" \
-		make CFLAGS="-Wno-error" nss_build_all BUILD_OPT=1 NSDISTMODE=copy NSPR_CONFIGURE_OPTS="--target=${XPREFIX} --build=x86_64-linux" NATIVE_CC=gcc
+		make CFLAGS="-Wno-error" nss_build_all BUILD_OPT=1 NSDISTMODE=copy NSPR_CONFIGURE_OPTS="--target=${XPREFIX} --build=x86_64-linux --disable-debug --disable-tests" NATIVE_CC=gcc
 	cp -L ../dist/*.OBJ/lib/*.so $PREFIX/lib/
 	cp -L ../dist/*.OBJ/lib/*.a $PREFIX/lib/
 	cp -r ../dist/*.OBJ/include $PREFIX/include/nss3

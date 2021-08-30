@@ -35,7 +35,7 @@ jobs:
           - {
               arch: x86_64,
               image_repo: debian,
-              image_tag: buster
+              image_tag: bullseye
             }
           - {
               arch: armhf,
