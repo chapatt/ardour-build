@@ -37,16 +37,16 @@ jobs:
               image_repo: debian,
               image_tag: bullseye
             }
-          - {
-              arch: armhf,
-              image_repo: debian,
-              image_tag: buster
-            }        
-          - {
-              arch: arm64,
-              image_repo: debian,
-              image_tag: buster
-            }
+          # - {
+          #     arch: armhf,
+          #     image_repo: debian,
+          #     image_tag: buster
+          #   }        
+          # - {
+          #     arch: arm64,
+          #     image_repo: debian,
+          #     image_tag: buster
+          #   }
     container:
       image: ${{ matrix.config.image_repo }}:${{ matrix.config.image_tag }}
       options: -v ${{ github.workspace }}:/home/ardour:rw
