@@ -28,13 +28,19 @@
 
 Now pre-built packages are available on:
 
-- Linux x86_64
-- MacOS Intel x86_64
-- Windows x86, x86_64
+|     OS      |       x86_64       |        x86         |        ARM         |
+| :---------: | :----------------: | :----------------: | :----------------: |
+| GNU / Linux | :heavy_check_mark: |        :x:         |        :x:         |
+|   Windows   | :heavy_check_mark: | :heavy_check_mark: |        :x:         |
+|    macOS    | :heavy_check_mark: |        :x:         |        :x:         |
 
-The builds are on three separate branches: [linux](https://github.com/ZetaoYang/ardour-build/tree/linux), [macos](https://github.com/ZetaoYang/ardour-build/tree/macos) and [win](https://github.com/ZetaoYang/ardour-build/tree/win).
+**NOTES:**
+
+- In the future, support for linux arm64/armhf, and macOS arm may be added.
 
 ## Build
+
+The builds are on three separate branches: [linux](https://github.com/ZetaoYang/ardour-build/tree/linux), [macos](https://github.com/ZetaoYang/ardour-build/tree/macos) and [win](https://github.com/ZetaoYang/ardour-build/tree/win).
 
 The action is triggered by [workflows push paths event](https://help.github.com/en/actions/reference/workflow-syntax-for-github-actions#onpushpull_requestpaths) or [the repo's dispatch event](https://developer.github.com/v3/repos/#create-a-repository-dispatch-event).
 
@@ -49,7 +55,7 @@ Trigger with curl command, example,
 curl -H "Accept: application/Accept: application/vnd.github.v3.full+json" \
 -H "Authorization: token your-personal-token" \
 --request POST \
---data '{"event_type": "ardour-linux-build"}' \
+--data '{\"event_type\": \"ardour-linux-build\"}' \
 https://api.github.com/repos/ZetaoYang/ardour-build/dispatches
 ```
 
@@ -59,7 +65,7 @@ or
 curl -H "Accept: application/Accept: application/vnd.github.v3.full+json" \
 -H "Authorization: token your-personal-token" \
 --request POST \
---data '{"event_type": "ardour-macos-build"}' \
+--data '{\"event_type\": \"ardour-macos-build\"}' \
 https://api.github.com/repos/ZetaoYang/ardour-build/dispatches
 ```
 
@@ -69,7 +75,7 @@ or
 curl -H "Accept: application/Accept: application/vnd.github.v3.full+json" \
 -H "Authorization: token your-personal-token" \
 --request POST \
---data '{"event_type": "ardour-win-build", "client_payload": { "version": "0.33.0"}}' \
+--data '{\"event_type\": \"ardour-win-build\", \"client_payload\": { \"version\": \"0.33.0\"}}' \
 https://api.github.com/repos/ZetaoYang/ardour-build/dispatches
 ```
 
