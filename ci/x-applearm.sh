@@ -138,7 +138,7 @@ src libffi-3.2.1 tar.gz ftp://sourceware.org/pub/libffi/libffi-3.2.1.tar.gz
 PREFIX="${BLDDEP}" nativebuild
 
 src gettext-0.21 tar.gz http://ftp.gnu.org/pub/gnu/gettext/gettext-0.21.tar.gz
-PREFIX="${BLDDEP}" nativebuild --disable-curses --with-included-gettext --with-libiconv-prefix="${BLDDEP}" --disable-curses --disable-java --disable-csharp --disable-openmp --without-bzip2 --without-xz
+PREFIX="${BLDDEP}" nativebuild --disable-curses --with-included-gettext --with-libiconv-prefix="${BLDDEP}" --disable-java --disable-csharp --disable-openmp --without-bzip2 --without-xz
 
 src glib-2.42.0 tar.xz  http://ftp.gnome.org/pub/gnome/sources/glib/2.42/glib-2.42.0.tar.xz
 LIBFFI_CFLAGS="-I${BLDDEP}/lib/libffi-3.2.1/include" \
@@ -190,7 +190,7 @@ src gtk-osx-docbook-1.0 tar.gz http://downloads.sourceforge.net/project/gtk-osx/
 JHBUILD_PREFIX=${BLDDEP} make install
 
 src gnome-doc-utils-0.20.10 tar.xz http://ftp.acc.umu.se/pub/gnome/sources/gnome-doc-utils/0.20/gnome-doc-utils-0.20.10.tar.xz
-sed -i.bak 's%/usr/bin/python%/usr/bin/env python%' xml2po/xml2po/xml2po.py.in
+LC_ALL=C sed -i.bak 's%/usr/bin/python%/usr/bin/env python%' xml2po/xml2po/xml2po.py.in
 
 PKG_CONFIG_PATH=${BLDDEP}/lib/pkgconfig \
 PYTHONPATH=$BLDDEP/lib/python${PYVERS}/site-packages/ \
@@ -213,8 +213,8 @@ tar xzf ${SRCDIR}/jack_headers.tar.gz
 src xz-5.2.2 tar.bz2 http://tukaani.org/xz/xz-5.2.2.tar.bz2
 autoconfbuild
 
-
-src zlib-1.2.7 tar.gz ftp://ftp.simplesystems.org/pub/libpng/png/src/history/zlib/zlib-1.2.7.tar.gz
+src zlib-1.2.7 tar.gz https://zlib.net/fossils/zlib-1.2.7.tar.gz
+# src zlib-1.2.7 tar.gz ftp://ftp.simplesystems.org/pub/libpng/png/src/history/zlib/zlib-1.2.7.tar.gz
 ./configure --prefix=$PREFIX --archs="-arch arm64"
 make $MAKEFLAGS
 make install
@@ -261,7 +261,7 @@ EOF
 autoconfbuild --disable-cpplibs --disable-asm-optimizations --disable-debug
 
 src libsndfile-1.0.27 tar.gz http://www.mega-nerd.com/libsndfile/files/libsndfile-1.0.27.tar.gz
-sed -i.bak 's/12292/24584/' src/common.h
+LC_ALL=C sed -i.bak 's/12292/24584/' src/common.h
 ed Makefile.in << EOF
 %s/ examples regtest tests programs//
 wq
@@ -293,7 +293,7 @@ CFLAGS=" -O0" CXXFLAGS=" -O0" \
 autoconfbuild --with-threads=no --with-zlib=$PREFIX --without-python
 
 src gettext-0.21 tar.gz http://ftp.gnu.org/pub/gnu/gettext/gettext-0.21.tar.gz
-autoconfbuild --build=arm64 --disable-curses --disable-openmp --without-bzip2 --without-xz
+autoconfbuild --build=arm64 --disable-curses --disable-java --disable-csharp --disable-openmp --without-bzip2 --without-xz
 
 src libxslt-1.1.33 tar.gz http://xmlsoft.org/sources/libxslt-1.1.33.tar.gz
 autoconfbuild --without-python --with-libxml-prefix=$PREFIX
@@ -342,7 +342,7 @@ autoconfbuild
 
 src gettext-0.21 tar.gz http://ftp.gnu.org/pub/gnu/gettext/gettext-0.21.tar.gz
 CFLAGS=" -O2" CXXFLAGS=" -O2" \
-autoconfbuild --build=arm64 --with-included-gettext --with-libiconv-prefix=$PREFIX
+autoconfbuild --build=arm64 --with-included-gettext --with-libiconv-prefix=$PREFIX --disable-curses --disable-java --disable-csharp --disable-openmp
 
 ################################################################################
 
@@ -412,7 +412,7 @@ ed gtk/gtkclipboard-quartz.c << EOF
 wq
 EOF
 patch -p1 < $this_script_dir/current-gtk-patches/gdk-draw-combined.diff
-sed -i.bak 's/ demos / /g' Makefile
+LC_ALL=C sed -i.bak 's/ demos / /g' Makefile
 
 make $MAKEFLAGS
 make install
@@ -477,7 +477,7 @@ autoconfbuild
 
 ################################################################################
 src taglib-1.9.1 tar.gz http://taglib.github.io/releases/taglib-1.9.1.tar.gz
-sed -i.bak 's/\~ListPrivate/virtual ~ListPrivate/' taglib/toolkit/tlist.tcc
+LC_ALL=C sed -i.bak 's/\~ListPrivate/virtual ~ListPrivate/' taglib/toolkit/tlist.tcc
 rm -rf build/
 mkdir build && cd build
 	cmake \
@@ -511,8 +511,8 @@ make install
 ################################################################################
 src boost_1_68_0 tar.bz2 http://sourceforge.net/projects/boost/files/boost/1.68.0/boost_1_68_0.tar.bz2
 ./bootstrap.sh --prefix=$PREFIX --with-libraries=exception,atomic
-sed -i.bak 's/4\.0\.0/0.0.0/' tools/build/src/tools/darwin.jam
-sed -i.bak 's/arch arm/arch arm64/' tools/build/src/tools/darwin.jam
+LC_ALL=C sed -i.bak 's/4\.0\.0/0.0.0/' tools/build/src/tools/darwin.jam
+LC_ALL=C sed -i.bak 's/arch arm/arch arm64/' tools/build/src/tools/darwin.jam
 PATH=/usr/bin:$PATH ./b2 --prefix=$PREFIX \
 	cflags="$GLOBAL_CFLAGS" cxxflags="$GLOBAL_CXXFLAGS" \
 	variant=release \
@@ -544,7 +544,7 @@ EOF
 
 src aubio-0.3.2 tar.gz http://aubio.org/pub/aubio-0.3.2.tar.gz
 ./bootstrap
-sed -i.bak '/no-long-double/d' ./configure
+LC_ALL=C sed -i.bak '/no-long-double/d' ./configure
 ed Makefile.in << EOF
 %s/examples / /
 wq
@@ -561,7 +561,7 @@ EOF
 
 src libwebsockets-4.0.15 tar.gz http://ardour.org/files/deps/libwebsockets-4.0.15.tar.gz
 rm -rf build/
-sed -i.bak 's%-Werror%%' CMakeLists.txt
+LC_ALL=C sed -i.bak 's%-Werror%%' CMakeLists.txt
 ed lib/event-libs/glib/glib.c << EOF
 26i
 #ifndef G_SOURCE_FUNC
