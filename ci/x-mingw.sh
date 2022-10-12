@@ -250,7 +250,7 @@ cp -av drmingw/$WARCH/* "$PREFIX"/
 src xz-5.2.2 tar.bz2 http://tukaani.org/xz/xz-5.2.2.tar.bz2
 autoconfbuild
 
-src zlib-1.2.7 tar.gz ftp://ftp.simplesystems.org/pub/libpng/png/src/history/zlib/zlib-1.2.7.tar.gz
+src zlib-1.2.7 tar.gz https://yer.dl.sourceforge.net/project/libpng/zlib/1.2.7/zlib-1.2.7.tar.gz
 make -fwin32/Makefile.gcc PREFIX=${XPREFIX}-
 make install -fwin32/Makefile.gcc SHARED_MODE=1 \
 	INCLUDE_PATH=${PREFIX}/include \
@@ -311,7 +311,7 @@ wq
 EOF
 autoconfbuild
 
-src expat-2.4.1 tar.gz https://sourceforge.net/projects/expat/files/expat/2.4.1/expat-2.4.1.tar.gz
+src expat-2.4.9 tar.gz https://udomain.dl.sourceforge.net/project/expat/expat/2.4.9/expat-2.4.9.tar.gz
 # src expat-2.1.0 tar.gz https://sourceforge.net/projects/expat/files/expat/2.1.0/expat-2.1.0-RENAMED-VULNERABLE-PLEASE-USE-2.3.0-INSTEAD.tar.gz
 autoconfbuild
 
