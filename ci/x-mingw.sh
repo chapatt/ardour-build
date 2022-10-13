@@ -358,7 +358,7 @@ CFLAGS="-O2 -mstackrealign" CXXFLAGS="-O2 -mstackrealign" \
 	./configure --host=${XPREFIX} --build=${HPREFIX}-linux --prefix=$PREFIX $@
 make $MAKEFLAGS && make install
 
-src glib-2.64.1 tar.xz http://ftp.gnome.org/pub/gnome/sources/glib/2.64/glib-2.64.1.tar.xz
+src glib-2.64.1 tar.xz https://gitlab.gnome.org/GNOME/glib/-/archive/glib-2-64/glib-glib-2-64.tar.gz
 mesonbuild -Dinternal_pcre=true
 
 src harfbuzz-2.6.4 tar.xz https://www.freedesktop.org/software/harfbuzz/release/harfbuzz-2.6.4.tar.xz
