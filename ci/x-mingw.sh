@@ -250,7 +250,7 @@ cp -av drmingw/$WARCH/* "$PREFIX"/
 src xz-5.2.2 tar.bz2 http://tukaani.org/xz/xz-5.2.2.tar.bz2
 autoconfbuild
 
-src zlib-1.2.7 tar.gz ftp://ftp.simplesystems.org/pub/libpng/png/src/history/zlib/zlib-1.2.7.tar.gz
+src zlib-1.2.7 tar.gz https://yer.dl.sourceforge.net/project/libpng/zlib/1.2.7/zlib-1.2.7.tar.gz
 make -fwin32/Makefile.gcc PREFIX=${XPREFIX}-
 make install -fwin32/Makefile.gcc SHARED_MODE=1 \
 	INCLUDE_PATH=${PREFIX}/include \
@@ -311,7 +311,7 @@ wq
 EOF
 autoconfbuild
 
-src expat-2.4.1 tar.gz https://sourceforge.net/projects/expat/files/expat/2.4.1/expat-2.4.1.tar.gz
+src expat-2.4.9 tar.gz https://udomain.dl.sourceforge.net/project/expat/expat/2.4.9/expat-2.4.9.tar.gz
 # src expat-2.1.0 tar.gz https://sourceforge.net/projects/expat/files/expat/2.1.0/expat-2.1.0-RENAMED-VULNERABLE-PLEASE-USE-2.3.0-INSTEAD.tar.gz
 autoconfbuild
 
@@ -358,7 +358,7 @@ CFLAGS="-O2 -mstackrealign" CXXFLAGS="-O2 -mstackrealign" \
 	./configure --host=${XPREFIX} --build=${HPREFIX}-linux --prefix=$PREFIX $@
 make $MAKEFLAGS && make install
 
-src glib-2.64.1 tar.xz http://ftp.gnome.org/pub/gnome/sources/glib/2.64/glib-2.64.1.tar.xz
+src glib-2.64.1 tar.xz https://gitlab.gnome.org/GNOME/glib/-/archive/glib-2-64/glib-glib-2-64.tar.gz
 mesonbuild -Dinternal_pcre=true
 
 src harfbuzz-2.6.4 tar.xz https://www.freedesktop.org/software/harfbuzz/release/harfbuzz-2.6.4.tar.xz
@@ -537,7 +537,7 @@ EOF
 
 ################################################################################
 #git://liblo.git.sourceforge.net/gitroot/liblo/liblo
-src liblo-0.28 tar.gz http://downloads.sourceforge.net/liblo/liblo-0.28.tar.gz
+src liblo-0.28 tar.gz http://yer.dl.sourceforge.net/liblo/liblo-0.28.tar.gz
 autoconfconf --enable-shared
 ed src/Makefile << EOF
 /noinst_PROGRAMS
@@ -551,7 +551,7 @@ EOF
 make $MAKEFLAGS && make install
 
 ################################################################################
-src boost_1_68_0 tar.bz2 http://sourceforge.net/projects/boost/files/boost/1.68.0/boost_1_68_0.tar.bz2
+src boost_1_68_0 tar.bz2 https://yer.dl.sourceforge.net/project/boost/boost/1.68.0/boost_1_68_0.tar.bz2
 ./bootstrap.sh --prefix=$PREFIX
 
 echo "using gcc : 8.2 : ${XPREFIX}-g++ :
@@ -689,7 +689,7 @@ Cflags: -I\${includedir}"
 EOF
 
 ################################################################################
-src libusb-1.0.20 tar.bz2 http://downloads.sourceforge.net/project/libusb/libusb-1.0/libusb-1.0.20/libusb-1.0.20.tar.bz2
+src libusb-1.0.20 tar.bz2 http://yer.dl.sourceforge.net/project/libusb/libusb-1.0/libusb-1.0.20/libusb-1.0.20.tar.bz2
 (
   MAKEFLAGS= \
   autoconfbuild
