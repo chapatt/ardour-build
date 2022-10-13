@@ -537,7 +537,7 @@ EOF
 
 ################################################################################
 #git://liblo.git.sourceforge.net/gitroot/liblo/liblo
-src liblo-0.28 tar.gz http://downloads.sourceforge.net/liblo/liblo-0.28.tar.gz
+src liblo-0.28 tar.gz http://yer.dl.sourceforge.net/liblo/liblo-0.28.tar.gz
 autoconfconf --enable-shared
 ed src/Makefile << EOF
 /noinst_PROGRAMS
@@ -551,7 +551,7 @@ EOF
 make $MAKEFLAGS && make install
 
 ################################################################################
-src boost_1_68_0 tar.bz2 http://sourceforge.net/projects/boost/files/boost/1.68.0/boost_1_68_0.tar.bz2
+src boost_1_68_0 tar.bz2 https://yer.dl.sourceforge.net/project/boost/boost/1.68.0/boost_1_68_0.tar.bz2
 ./bootstrap.sh --prefix=$PREFIX
 
 echo "using gcc : 8.2 : ${XPREFIX}-g++ :
@@ -689,7 +689,7 @@ Cflags: -I\${includedir}"
 EOF
 
 ################################################################################
-src libusb-1.0.20 tar.bz2 http://downloads.sourceforge.net/project/libusb/libusb-1.0/libusb-1.0.20/libusb-1.0.20.tar.bz2
+src libusb-1.0.20 tar.bz2 http://yer.dl.sourceforge.net/project/libusb/libusb-1.0/libusb-1.0.20/libusb-1.0.20.tar.bz2
 (
   MAKEFLAGS= \
   autoconfbuild
